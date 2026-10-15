@@ -3,7 +3,6 @@ import SwiftUI
 import KeyphoreCore
 
 struct KeyphorePopover: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var state: KeyphoreAppState
     private let foregroundWindowAction: ForegroundWindowAction
@@ -18,11 +17,6 @@ struct KeyphorePopover: View {
 
     private var presentation: KeyboardSignalPresentation {
         KeyboardSignalPresentation(snapshot: state.snapshot, preview: state.previewRecord)
-    }
-
-    private var animatesSignal: Bool {
-        presentation.isLit && !presentation.isPreviewing
-            && presentation.appearance?.pattern == .slowFlashing && !reduceMotion
     }
 
     var body: some View {
@@ -83,13 +77,10 @@ struct KeyphorePopover: View {
                            ? 344 / CandidateKeyboardIllustration(model: candidateModels[0]).aspectRatio : 280)
                     .padding(.bottom, 18)
                 } else {
-                    TimelineView(.animation(minimumInterval: 0.2, paused: !animatesSignal)) { context in
-                        Air65KeyboardView(
-                            presentation: presentation,
-                            isPatternLit: !animatesSignal || Int(context.date.timeIntervalSince1970) % 2 == 0,
-                            layout: state.snapshot.keyboardHealth.model == .air75V3 ? .air75ANSI : .air65
-                        )
-                    }
+                    Air65KeyboardView(
+                        presentation: presentation,
+                        layout: state.snapshot.keyboardHealth.model == .air75V3 ? .air75ANSI : .air65
+                    )
                     .frame(width: 344, height: 344 * (state.snapshot.keyboardHealth.model == .air75V3 ? 186 : 160) / 416)
                     .padding(.bottom, 18)
                 }
@@ -174,13 +165,15 @@ struct KeyphorePopover: View {
         if case .unverified = state.snapshot.keyboardHealth { return AppCopy.value(.keyboardUnverifiedDetail) }
         if state.menuState != .ready { return AppCopy.value(.previewUnavailable) }
         if presentation.isPreviewing {
+            if state.previewRecord?.currentPreset == .idle { return AppCopy.value(.settingsIdle) }
             return AppCopy.value(presentation.signal.presentation(in: state.snapshot.profile).copyKey)
         }
         switch presentation.signal {
         case .execution: return AppCopy.value(.statusExecutionDetail)
         case .attention: return AppCopy.value(.statusAttentionDetail)
         case .completion: return AppCopy.value(.statusCompletionDetail)
-        case .signalOff: return AppCopy.value(.signalOffDescription)
+        case .signalOff:
+            return AppCopy.value(state.snapshot.profile.idle.isVisible ? .statusIdleDetail : .signalOffDescription)
         }
     }
 
@@ -223,12 +216,14 @@ struct SignalPreviewFeedback: View {
                 Text(AppCopy.value(.migrationPreviewDescription)).foregroundStyle(.secondary)
             }
             if allowsRestart {
-                Button(AppCopy.value(state.previewRecord == nil ? .deviceCheckStart : .deviceCheckRetry), action: state.beginSignalPreview)
+                Button(AppCopy.value(state.previewRecord == nil ? .deviceCheckStart : .deviceCheckRetry)) {
+                    state.beginSignalPreview()
+                }
                     .disabled(state.menuState != .ready || state.previewRecord?.phase == .pending
                               || state.previewRecord?.phase == .presenting
                               || state.previewRecord?.phase == .awaitingVisualConfirmation)
             }
-            if let preview = state.previewRecord {
+            if let preview = state.previewRecord, preview.requestedPreset == nil {
                 Text(AppCopy.value(.deviceCheckRecent)).font(.caption).foregroundStyle(.secondary)
                 switch preview.phase {
                 case .pending, .presenting:
@@ -242,6 +237,7 @@ struct SignalPreviewFeedback: View {
                 case .confirmed: Text(AppCopy.value(.previewConfirmed)).foregroundStyle(.secondary)
                 case .rejected: Text(AppCopy.value(.previewRejected)).foregroundStyle(.secondary)
                 case .failed: Text(AppCopy.value(.previewFailed)).foregroundStyle(.red)
+                case .completed: EmptyView()
                 }
             }
         }.font(.system(size: 12))
@@ -257,8 +253,15 @@ private struct GuidedSetupView: View {
                 .font(.headline)
 
             if state.setupSnapshot.phase == .codexHostMissing {
-                Label(AppCopy.value(.setupHostMissing), systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.secondary)
+                if state.canManageAgentIntegrations {
+                    ScrollView {
+                        AgentIntegrationsView(state: state)
+                    }
+                    .frame(maxHeight: 360)
+                } else {
+                    Label(AppCopy.value(.setupHostMissing), systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.secondary)
+                }
                 Button(AppCopy.value(.setupRepair), action: state.refresh)
             } else if state.setupSnapshot.phase == .legacyMigrationReview
                         || state.setupSnapshot.phase == .legacyMigrationRepair {

@@ -28,6 +28,11 @@ final class KeyphoreAppState: ObservableObject {
     @Published var removalIsPresented = false
     @Published private(set) var removalIsWorking = false
     @Published private(set) var removalFailed = false
+    @Published private(set) var agentSourceSnapshots: [AgentSourceSnapshot] = []
+    @Published private(set) var agentIntegrationReview: AgentIntegrationReview?
+    @Published private(set) var agentIntegrationWorkingSource: AgentSource?
+    @Published private(set) var agentIntegrationFailedSources: Set<AgentSource> = []
+    @Published var agentRemovalSource: AgentSource?
     @Published var loginLaunchEnabled = true
     @Published private(set) var preferences: AppPreferences
 
@@ -42,8 +47,12 @@ final class KeyphoreAppState: ObservableObject {
     private var latestDiagnosticSnapshot: DiagnosticSnapshot
     private let preferencesStore: AppPreferencesStore
     private let managedRemoval: ManagedRemoval?
+    private let agentIntegrations: SystemAgentIntegrations?
     private let updateRuntime: (any KeyphoreRuntimeManaging)?
     private var durableStatusTimer: Timer?
+    private var agentIntegrationTask: Task<Void, Never>?
+    private var agentSnapshotRefreshTask: Task<Void, Never>?
+    private var agentSnapshotGeneration: UInt64 = 0
 
     init(
         lifecycle: KeyphoreLifecycle,
@@ -53,6 +62,7 @@ final class KeyphoreAppState: ObservableObject {
         previewStore: SignalPreviewStore? = nil,
         experimentalStore: ExperimentalKeyboardStore? = nil,
         managedRemoval: ManagedRemoval? = nil,
+        agentIntegrations: SystemAgentIntegrations? = nil,
         updateRuntime: (any KeyphoreRuntimeManaging)? = nil,
         diagnosticSnapshotProvider: (@Sendable () -> DiagnosticSnapshot)? = nil,
         diagnosticLanguage: AppLanguage = .english,
@@ -67,12 +77,17 @@ final class KeyphoreAppState: ObservableObject {
         self.experimentalStore = experimentalStore
         experimentalRecords = (try? experimentalStore?.records()) ?? []
         self.managedRemoval = managedRemoval
+        self.agentIntegrations = agentIntegrations
         self.updateRuntime = updateRuntime
         self.diagnosticSnapshotProvider = diagnosticSnapshotProvider
         self.diagnosticLanguage = diagnosticLanguage
         self.preferencesStore = preferencesStore
         preferences = preferencesStore.load()
         diagnosticReportIsReady = diagnosticSnapshotProvider == nil
+        let initialAgentSnapshots = (try? agentIntegrations?.localSnapshots()) ?? []
+        if initialAgentSnapshots.contains(where: { $0.source != .codex && $0.approved }) {
+            systemHealth?.isConfigured = true
+        }
         let initialSnapshot = lifecycle.refresh()
         snapshot = initialSnapshot
         let diagnosticSnapshot = DiagnosticSnapshot(
@@ -89,6 +104,7 @@ final class KeyphoreAppState: ObservableObject {
         )
         self.guidedSetup = guidedSetup
         setupSnapshot = Self.initialSetupSnapshot(for: initialSnapshot)
+        agentSourceSnapshots = initialAgentSnapshots
         if let profileStore {
             validationFailed = (try? profileStore.load()) == nil
         }
@@ -102,7 +118,7 @@ final class KeyphoreAppState: ObservableObject {
         if !deferSystemStartup, let guidedSetup, let inspected = try? guidedSetup.inspect() {
             lastSetupInspection = .now
             setupSnapshot = inspected
-            systemHealth?.isConfigured = inspected.phase.isConfigured
+            systemHealth?.isConfigured = inspected.phase.isConfigured || hasReadyAgentSource
             if inspected.phase.isConfigured {
                 loginLaunchEnabled = guidedSetup.loginLaunchEnabled()
             }
@@ -130,7 +146,10 @@ final class KeyphoreAppState: ObservableObject {
                 }
                 self.snapshot = self.lifecycle.refresh()
                 self.isStarting = false
+                self.refreshAgentIntegrations()
             }
+        } else {
+            refreshAgentIntegrations()
         }
         durableStatusTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
             [weak self] _ in
@@ -152,12 +171,14 @@ final class KeyphoreAppState: ObservableObject {
         let runtime: any KeyphoreRuntimeManaging
         let diagnosticSnapshotProvider: (@Sendable () -> DiagnosticSnapshot)?
         let managedRemoval: ManagedRemoval?
+        let agentIntegrations: SystemAgentIntegrations?
         if environment["KEYPHORE_ACCEPTANCE_FIXTURE"] == nil {
             durableStatus = SystemDurableStatusAdapter()
             let services = GuidedSetup.systemServices()
             guidedSetup = services.setup
             runtime = services.runtime ?? FixtureRuntimeAdapter()
             managedRemoval = services.removal
+            agentIntegrations = services.integrations
             let adapter = SystemKeyphoreHealthAdapter(isConfigured: false)
             systemHealth = adapter
             health = adapter
@@ -191,6 +212,7 @@ final class KeyphoreAppState: ObservableObject {
             profiles = FixtureProfileAdapter()
             runtime = FixtureRuntimeAdapter()
             managedRemoval = nil
+            agentIntegrations = nil
             let appVersion = Self.appVersion()
             let macOSVersion = Self.macOSVersion()
             diagnosticSnapshotProvider = {
@@ -218,6 +240,7 @@ final class KeyphoreAppState: ObservableObject {
             previewStore: previewStore,
             experimentalStore: environment["KEYPHORE_ACCEPTANCE_FIXTURE"] == nil ? ExperimentalKeyboardStore() : nil,
             managedRemoval: managedRemoval,
+            agentIntegrations: agentIntegrations,
             updateRuntime: runtime,
             diagnosticSnapshotProvider: diagnosticSnapshotProvider,
             diagnosticLanguage: Self.appLanguage(),
@@ -227,7 +250,125 @@ final class KeyphoreAppState: ObservableObject {
 
     func refresh() {
         refreshSetupSnapshot()
+        refreshAgentIntegrations()
         snapshot = lifecycle.refresh()
+    }
+
+    var canManageAgentIntegrations: Bool { agentIntegrations != nil }
+
+    var hasReadyAgentSource: Bool {
+        agentSourceSnapshots.contains { $0.source != .codex && $0.approved }
+    }
+
+    func refreshAgentIntegrations() {
+        guard let agentIntegrations, agentIntegrationWorkingSource == nil,
+              !isStarting, !setupIsWorking, !removalIsWorking else { return }
+        let generation = nextAgentSnapshotGeneration()
+        agentSnapshotRefreshTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try agentIntegrations.snapshots() }
+            }.value
+            guard let self else { return }
+            if case .success(let snapshots) = result, generation == self.agentSnapshotGeneration {
+                self.applyAgentSnapshots(snapshots)
+            }
+        }
+    }
+
+    func reviewAgentIntegration(_ source: AgentSource) {
+        guard source != .codex, let agentIntegrations,
+              agentIntegrationWorkingSource == nil,
+              !isStarting, !setupIsWorking, !removalIsWorking else { return }
+        agentIntegrationWorkingSource = source
+        agentIntegrationFailedSources.remove(source)
+        agentIntegrationTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try agentIntegrations.review(source) }
+            }.value
+            guard let self else { return }
+            switch result {
+            case .success(let review): self.agentIntegrationReview = review
+            case .failure: self.agentIntegrationFailedSources.insert(source)
+            }
+            self.agentIntegrationWorkingSource = nil
+        }
+    }
+
+    func installReviewedAgentIntegration() {
+        guard let review = agentIntegrationReview, let agentIntegrations,
+              agentIntegrationWorkingSource == nil,
+              !isStarting, !setupIsWorking, !removalIsWorking else { return }
+        let source = review.source
+        let generation = nextAgentSnapshotGeneration()
+        agentIntegrationWorkingSource = source
+        agentIntegrationFailedSources.remove(source)
+        agentIntegrationTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) { () -> (Bool, [AgentSourceSnapshot]?) in
+                do {
+                    try agentIntegrations.install(source, reviewedDigest: review.digest)
+                    return (true, (try? agentIntegrations.snapshots()) ?? (try? agentIntegrations.localSnapshots()))
+                } catch {
+                    return (false, nil)
+                }
+            }.value
+            guard let self else { return }
+            if result.0 {
+                self.agentIntegrationReview = nil
+                if generation == self.agentSnapshotGeneration, let snapshots = result.1 {
+                    self.applyAgentSnapshots(snapshots)
+                }
+            } else {
+                self.agentIntegrationFailedSources.insert(source)
+            }
+            self.agentIntegrationWorkingSource = nil
+        }
+    }
+
+    func requestAgentIntegrationRemoval(_ source: AgentSource) {
+        guard source != .codex else { return }
+        agentRemovalSource = source
+    }
+
+    func cancelAgentIntegrationRemoval() {
+        agentRemovalSource = nil
+    }
+
+    func confirmAgentIntegrationRemoval() {
+        guard let source = agentRemovalSource, let agentIntegrations,
+              agentIntegrationWorkingSource == nil,
+              !isStarting, !setupIsWorking, !removalIsWorking else { return }
+        agentRemovalSource = nil
+        let generation = nextAgentSnapshotGeneration()
+        agentIntegrationWorkingSource = source
+        agentIntegrationFailedSources.remove(source)
+        agentIntegrationTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) { () -> (Bool, [AgentSourceSnapshot]?) in
+                do {
+                    try agentIntegrations.remove(source)
+                    return (true, (try? agentIntegrations.snapshots()) ?? (try? agentIntegrations.localSnapshots()))
+                } catch {
+                    return (false, nil)
+                }
+            }.value
+            guard let self else { return }
+            if result.0 {
+                if self.agentIntegrationReview?.source == source { self.agentIntegrationReview = nil }
+                if generation == self.agentSnapshotGeneration, let snapshots = result.1 {
+                    self.applyAgentSnapshots(snapshots)
+                }
+            } else {
+                self.agentIntegrationFailedSources.insert(source)
+            }
+            self.agentIntegrationWorkingSource = nil
+        }
+    }
+
+    func waitForAgentIntegrationOperation() async {
+        await agentIntegrationTask?.value
+    }
+
+    func waitForAgentSnapshotRefresh() async {
+        await agentSnapshotRefreshTask?.value
     }
 
     func refreshDiagnosticReport() {
@@ -246,7 +387,8 @@ final class KeyphoreAppState: ObservableObject {
     }
 
     func configureAfterReview() {
-        guard let guidedSetup, !isStarting, !setupIsWorking, !removalIsWorking else { return }
+        guard let guidedSetup, !isStarting, !setupIsWorking, !removalIsWorking,
+              agentIntegrationWorkingSource == nil else { return }
         setupIsWorking = true
         setupFailed = false
         setupHooksChanged = false
@@ -272,7 +414,8 @@ final class KeyphoreAppState: ObservableObject {
     }
 
     func migrateLegacyAfterReview() {
-        guard let guidedSetup, !isStarting, !setupIsWorking, !removalIsWorking else { return }
+        guard let guidedSetup, !isStarting, !setupIsWorking, !removalIsWorking,
+              agentIntegrationWorkingSource == nil else { return }
         setupIsWorking = true
         setupFailed = false
         setupHooksChanged = false
@@ -299,7 +442,8 @@ final class KeyphoreAppState: ObservableObject {
     }
 
     func prepareToQuit() -> Bool {
-        guard !isStarting, !setupIsWorking, !removalIsWorking else {
+        guard !isStarting, !setupIsWorking, !removalIsWorking,
+              agentIntegrationWorkingSource == nil else {
             quitFailed = true
             return false
         }
@@ -343,7 +487,8 @@ final class KeyphoreAppState: ObservableObject {
     }
 
     func confirmManagedRemoval() {
-        guard let managedRemoval, !isStarting, !setupIsWorking, !removalIsWorking else { return }
+        guard let managedRemoval, !isStarting, !setupIsWorking, !removalIsWorking,
+              agentIntegrationWorkingSource == nil else { return }
         removalIsWorking = true
         removalFailed = false
         Task {
@@ -383,14 +528,25 @@ final class KeyphoreAppState: ObservableObject {
         save(snapshot.profile.replacingAppearance(appearance, for: signal))
     }
 
-    func resetSignalColor(for signal: CodexSignal) {
+    func updateAppearance(_ appearance: SignalAppearance, for preset: LightingPreset) {
+        if save(snapshot.profile.replacingAppearance(appearance, forPreset: preset)), preset == .idle {
+            beginSignalPreview(for: .idle)
+        }
+    }
+
+    func resetSignalColor(for signal: CodexSignal, zone: LightingZone) {
         let appearance = snapshot.profile.appearance(for: signal)
-        updateAppearance(SignalAppearance(
-            isVisible: appearance.isVisible,
-            color: LocalProfile.default.appearance(for: signal).color,
-            brightness: appearance.brightness,
-            pattern: appearance.pattern
-        ), for: signal)
+        let currentZone = appearance.appearance(for: zone)
+        let defaultColor = LocalProfile.default.appearance(for: signal).appearance(for: zone).color
+        updateAppearance(appearance.replacingAppearance(ZoneAppearance(
+            effect: currentZone.effect, color: defaultColor, colorMode: .custom,
+            brightness: currentZone.brightness, speed: currentZone.speed, direction: currentZone.direction
+        ), for: zone), for: signal)
+    }
+
+    @discardableResult
+    func updateControlledZones(_ zones: ControlledZones) -> Bool {
+        save(snapshot.profile.replacingControlledZones(zones))
     }
 
     func updatePreferences(_ preferences: AppPreferences) {
@@ -407,7 +563,9 @@ final class KeyphoreAppState: ObservableObject {
                 execution: profile.execution,
                 attention: profile.attention,
                 completion: profile.completion,
-                completionDisplayDuration: duration
+                idle: profile.idle,
+                completionDisplayDuration: duration,
+                controlledZones: profile.controlledZones
             )
         )
     }
@@ -416,10 +574,10 @@ final class KeyphoreAppState: ObservableObject {
         DiagnosticReport(snapshot: latestDiagnosticSnapshot, language: diagnosticLanguage, preview: previewRecord)
     }
 
-    func beginSignalPreview() {
+    func beginSignalPreview(for preset: LightingPreset? = nil) {
         guard menuState == .ready, let previewStore else { return }
         do {
-            previewRecord = try previewStore.begin()
+            previewRecord = try previewStore.begin(preset: preset)
             settingsFailed = false
             previewStateFailed = false
         } catch {
@@ -454,6 +612,8 @@ final class KeyphoreAppState: ObservableObject {
 
     var menuState: MenuState {
         switch setupSnapshot.phase {
+        case .codexHostMissing where hasReadyAgentSource:
+            snapshot.menuState
         case .codexHostMissing, .legacyMigrationReview, .legacyMigrationRepair, .hookReview:
             .configurationRequired
         case .configured, .ready: snapshot.menuState
@@ -491,18 +651,33 @@ final class KeyphoreAppState: ObservableObject {
 
     private func apply(_ inspected: GuidedSetupSnapshot) {
         setupSnapshot = inspected
-        systemHealth?.isConfigured = inspected.phase.isConfigured
+        systemHealth?.isConfigured = inspected.phase.isConfigured || hasReadyAgentSource
     }
 
-    private func save(_ profile: LocalProfile) {
-        guard let profileStore else { return }
+    private func applyAgentSnapshots(_ snapshots: [AgentSourceSnapshot]) {
+        agentSourceSnapshots = snapshots
+        systemHealth?.isConfigured = setupSnapshot.phase.isConfigured || hasReadyAgentSource
+        snapshot = lifecycle.refresh()
+        refreshDiagnosticReport()
+    }
+
+    private func nextAgentSnapshotGeneration() -> UInt64 {
+        agentSnapshotGeneration &+= 1
+        return agentSnapshotGeneration
+    }
+
+    @discardableResult
+    private func save(_ profile: LocalProfile) -> Bool {
+        guard let profileStore else { return false }
         do {
             try profileStore.save(profile)
             snapshot = lifecycle.refresh()
             settingsFailed = false
             validationFailed = false
+            return true
         } catch {
             settingsFailed = true
+            return false
         }
     }
 
@@ -638,10 +813,11 @@ private struct SystemDurableStatusAdapter: DurableStatusProviding {
 
 final class SystemKeyphoreHealthAdapter: KeyphoreHealthProviding {
     var isConfigured: Bool
-    private let keyboardHealth = KeyboardHealthStore(url: KeyphoreRuntimePaths.keyboardHealthURL())
+    private let keyboardHealth: KeyboardHealthStore
 
-    init(isConfigured: Bool) {
+    init(isConfigured: Bool, keyboardHealth: KeyboardHealthStore = KeyboardHealthStore(url: KeyphoreRuntimePaths.keyboardHealthURL())) {
         self.isConfigured = isConfigured
+        self.keyboardHealth = keyboardHealth
     }
 
     func currentHealth() -> KeyphoreHealth {

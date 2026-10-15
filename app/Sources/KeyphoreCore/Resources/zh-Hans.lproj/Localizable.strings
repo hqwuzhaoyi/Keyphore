@@ -13,7 +13,7 @@
 "signal.short.execution" = "执行";
 "signal.short.attention" = "注意";
 "signal.short.completion" = "完成";
-"signal.off_description" = "主背光已熄灭，等待下一个信号";
+"signal.off_description" = "受控灯光已熄灭，等待下一个任务。";
 "signal.hidden" = "此信号已隐藏";
 "keyboard.illustration" = "Air65 V3 键盘示意";
 "preview.running_short" = "正在预览…";
@@ -72,9 +72,57 @@
 "settings.visibility" = "显示";
 "settings.color" = "颜色";
 "settings.brightness" = "亮度";
-"settings.pattern" = "样式";
+"settings.pattern" = "灯效";
 "settings.pattern.steady" = "常亮";
 "settings.pattern.slow_flashing" = "慢闪";
+"settings.pattern.breathing" = "呼吸";
+"settings.pattern.pulse" = "柔和脉冲";
+"settings.pattern.color_cycle" = "彩虹渐变";
+"settings.pattern.color_cycle_help" = "从所选颜色开始循环变换色相。";
+"settings.lighting_preview" = "灯效预览";
+"settings.recent_colors" = "最近颜色";
+"settings.controlled_zones" = "Keyphore 控制";
+"settings.zones" = "灯光区域";
+"settings.zone.backlight" = "键盘背光";
+"settings.zone.strip" = "条形灯";
+"settings.manage.backlight" = "背光";
+"settings.manage.strip" = "条形灯";
+"settings.manage.both" = "两者";
+"settings.managed" = "由 Keyphore 控制";
+"settings.unmanaged" = "保持不变";
+"settings.zone_unmanaged_detail" = "请在上方选择此区域，允许 Keyphore 控制。";
+"settings.native_effect" = "原生灯效";
+"settings.parameters" = "灯效参数";
+"settings.speed" = "速度";
+"settings.direction" = "方向";
+"settings.direction.left" = "向左";
+"settings.direction.right" = "向右";
+"settings.direction.up" = "向上";
+"settings.direction.down" = "向下";
+"settings.custom_color" = "自定义颜色";
+"settings.preview_approximate" = "仅预览颜色与区域；原生动态效果请以键盘显示为准，涟漪、单点等响应式灯效需按键触发。";
+"effect.spectrum" = "光谱";
+"effect.gradient" = "阶梯";
+"effect.static" = "静态";
+"effect.breathing" = "呼吸";
+"effect.flowers" = "百花";
+"effect.wave" = "波浪";
+"effect.up_down_wave" = "上下波浪";
+"effect.fountain" = "喷泉";
+"effect.galaxy" = "银河";
+"effect.rotation" = "旋转";
+"effect.ripple" = "涟漪";
+"effect.single_point" = "单点";
+"effect.grid" = "宫格";
+"effect.flowing" = "流光";
+"effect.rain" = "落雨";
+"effect.wave_band" = "波带";
+"effect.gaming" = "游戏";
+"effect.identify" = "定位";
+"effect.windmill" = "风车";
+"effect.diagonal" = "双标";
+"effect.rhythm" = "律动";
+"effect.neon" = "霓虹";
 "settings.completion_duration" = "完成信号显示时长";
 "settings.seconds" = "秒";
 "settings.save_error" = "设置未能保存，请重试。";
@@ -135,7 +183,7 @@
 "diagnostic.save" = "保存诊断 ZIP…";
 "diagnostic.save_failed" = "无法保存诊断 ZIP，请尝试其他位置。";
 "removal.title" = "移除 Keyphore";
-"removal.description" = "Keyphore 将先关闭信号灯、停用自己管理的八个 Hook，并且只移除下面列出的托管组件。其他 Codex Plugin、Hook、Codex 安装和用户文件不会改变。";
+"removal.description" = "Keyphore 将先关闭信号灯、停用自身的 Agent 集成，并且只移除下面列出的托管组件。其他 Agent 插件、Hook、安装和用户文件不会改变。";
 "removal.action" = "移除 Keyphore 托管组件…";
 "removal.confirm" = "确认移除";
 "removal.repair_title" = "继续移除 Keyphore";
@@ -178,8 +226,8 @@
 "status.attention" = "需要你的注意";
 "status.completed" = "任务已完成";
 "status.no_signal" = "暂时没有任务信号";
-"status.execution_detail" = "Codex 任务进行中，无需操作";
-"status.attention_detail" = "请回到 Codex 查看待处理事项";
+"status.execution_detail" = "编程 Agent 正在工作，无需操作";
+"status.attention_detail" = "请回到编程 Agent 查看待处理事项";
 "status.completion_detail" = "完成提示结束后，恢复当前任务信号";
 "status.usb_connected" = "USB 已连接";
 "status.waiting_for_usb" = "等待 USB 连接";
@@ -217,7 +265,7 @@
 "settings.tab.lights" = "灯效";
 "settings.tab.device" = "设备";
 "settings.tab.about" = "关于";
-"about.description" = "用键盘灯光，看见 Codex 的任务状态。";
+"about.description" = "用键盘灯光，看见编程 Agent 的任务状态。";
 "about.version" = "版本 %@（%@）";
 "about.website" = "项目主页";
 "about.more_apps" = "我的其他作品";
@@ -232,6 +280,44 @@
 "about.follow_developer" = "关注开发者";
 
 "diagnostic.preview.pending" = "等待开始";
-"diagnostic.preview.rhythm" = "节奏灯保持不变";
+"diagnostic.preview.rhythm" = "未托管灯光区域保持不变";
 "diagnostic.preview.visual" = "目视确认";
 "diagnostic.preview.unconfirmed" = "尚未确认";
+"settings.tab.integrations" = "Agent";
+"integrations.title" = "Agent 集成";
+"integrations.detail" = "将已安装的编程 Agent 连接到 Keyphore。";
+"integrations.available" = "可用";
+"integrations.unavailable" = "未安装";
+"integrations.enabled" = "已启用";
+"integrations.needs_review" = "需要重新审查";
+"integrations.not_enabled" = "未启用";
+"integrations.review" = "审查";
+"integrations.review_title" = "启用前审查";
+"integrations.events" = "事件";
+"integrations.files" = "Keyphore 将安装的文件";
+"integrations.privacy" = "Keyphore 仅保留生命周期标识和事件时间。提示词、回复、对话记录和工具内容绝不会被持久化或上传。";
+"integrations.enable" = "启用集成";
+"integrations.remove" = "移除";
+"integrations.remove_title" = "移除集成？";
+"integrations.remove_message" = "Keyphore 只会移除此 Agent 对应的自身文件和注册信息。";
+"integrations.cancel" = "取消";
+"integrations.working" = "处理中…";
+"integrations.error" = "无法更改此集成，其他 Agent 未受影响。";
+"integrations.codex_managed" = "由 Codex 引导设置管理";
+"integrations.pi_signals" = "Pi 会报告执行、完成和取消；它没有标准化的注意事件。";
+
+"settings.color_presets" = "颜色预设";
+
+"settings.automatic_colors" = "此灯效使用内置配色，无需选择颜色。";
+
+"settings.idle" = "空闲";
+
+"settings.idle_behavior" = "空闲时";
+
+"settings.idle_off" = "关闭灯光";
+
+"settings.idle_custom" = "使用空闲灯效";
+
+"settings.idle_detail" = "没有活动任务、完成提示结束后使用此设置。退出 Keyphore 仍会关闭受控灯光。";
+
+"status.idle_detail" = "当前没有活动任务，正在显示空闲灯效。";

@@ -3,6 +3,27 @@ import XCTest
 import KeyphoreCore
 
 final class DiagnosticReportAcceptanceTests: XCTestCase {
+    func testHealthyNativeIntegrationDoesNotRecommendInstallingCodex() throws {
+        let report = DiagnosticReport(
+            snapshot: DiagnosticSnapshot(
+                appVersion: "0.1.0 (1)",
+                macOSVersion: "macOS 15.6.1",
+                codexHosts: [],
+                integration: SetupIntegrationHealth(
+                    pluginInstalled: true,
+                    hooksTrusted: true,
+                    companionRegistered: true,
+                    managedStatePresent: true
+                ),
+                keyboard: .disconnected
+            ),
+            language: .english
+        )
+
+        XCTAssertEqual(try report.field(.codexHost).value, "Not installed")
+        XCTAssertNil(try report.field(.codexHost).action)
+    }
+
     func testPreviewShowsTheExactReviewedFieldsAndActionableFailures() throws {
         let report = DiagnosticReport(
             snapshot: DiagnosticSnapshot(
@@ -235,7 +256,7 @@ final class DiagnosticReportAcceptanceTests: XCTestCase {
             var record = try store.begin(at: .milliseconds(1_000))
             record.phase = .awaitingVisualConfirmation
             record.protocolReadbackSucceeded = true
-            record.rhythmLightPreserved = true
+            record.unmanagedZonesPreserved = true
             try store.save(record)
             try store.recordVisualConfirmation(confirmation)
             let report = DiagnosticReport(snapshot: snapshot, language: .english, preview: try store.load())

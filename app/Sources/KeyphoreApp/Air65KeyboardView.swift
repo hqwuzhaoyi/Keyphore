@@ -3,7 +3,6 @@ import KeyphoreCore
 
 struct Air65KeyboardView: View {
     let presentation: KeyboardSignalPresentation
-    var isPatternLit = true
     var layout: Layout = .air65
 
     enum Layout {
@@ -159,7 +158,9 @@ struct Air65KeyboardView: View {
         .aspectRatio(416 / layout.height, contentMode: .fit)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AppCopy.value(layout.illustrationKey))
-        .accessibilityValue(AppCopy.value(!presentation.isControlAvailable ? .keyboardUnverified : presentation.signal.presentation(in: .default).copyKey))
+        .accessibilityValue(AppCopy.value(!presentation.isControlAvailable ? .keyboardUnverified
+            : presentation.signal == .signalOff && presentation.isLit ? .settingsIdle
+            : presentation.signal.presentation(in: .default).copyKey))
         .accessibilityHint(AppCopy.value(!presentation.isControlAvailable ? .keyboardUnverifiedDetail : .rhythmLightUnchanged))
         .help(AppCopy.value(!presentation.isControlAvailable ? .keyboardUnverifiedDetail : .rhythmLightUnchanged))
     }
@@ -197,7 +198,8 @@ struct Air65KeyboardView: View {
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 5 * scale, style: .continuous)
-                        .fill(presentation.color.opacity(key.surface == .standard ? lightOpacity * 0.07 : 0))
+                        .fill(presentation.color(for: .backlight)
+                            .opacity(key.surface == .standard ? presentation.opacity(for: .backlight) * 0.07 : 0))
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 5 * scale, style: .continuous)
@@ -218,19 +220,17 @@ struct Air65KeyboardView: View {
                         Circle().fill(.black.opacity(0.08)).frame(width: 11 * scale, height: 11 * scale)
                     }
                 }
-                .shadow(color: presentation.color.opacity(lightOpacity * 0.22), radius: 2 * scale, y: scale)
+                .shadow(color: presentation.color(for: .backlight)
+                    .opacity(presentation.opacity(for: .backlight) * 0.22), radius: 2 * scale, y: scale)
                 .overlay(alignment: .bottom) {
                     Capsule()
-                        .fill(presentation.color.opacity(lightOpacity * 0.58))
+                        .fill(presentation.color(for: .backlight)
+                            .opacity(presentation.opacity(for: .backlight) * 0.58))
                         .frame(height: 2 * scale)
                         .padding(.horizontal, 3 * scale)
                         .padding(.bottom, 2 * scale)
                 }
         }
-    }
-
-    private var lightOpacity: Double {
-        presentation.isLit && isPatternLit ? Double(presentation.appearance?.brightness.percent ?? 0) / 100 : 0
     }
 
     private func surfaceColor(_ key: Key) -> Color {
@@ -244,9 +244,12 @@ struct Air65KeyboardView: View {
 
     private func rhythmLight(scale: CGFloat, height: CGFloat) -> some View {
         Capsule()
-            .fill(Color(red: 0.43, green: 0.94, blue: 1).opacity(0.78))
+            .fill(presentation.controlledZones.contains(.strip)
+                  ? presentation.color(for: .strip).opacity(presentation.opacity(for: .strip))
+                  : Color.secondary.opacity(0.25))
             .frame(width: 2.5 * scale, height: height)
-            .shadow(color: .cyan.opacity(0.4), radius: 2 * scale)
+            .shadow(color: presentation.color(for: .strip)
+                .opacity(presentation.opacity(for: .strip) * 0.4), radius: 2 * scale)
     }
 }
 

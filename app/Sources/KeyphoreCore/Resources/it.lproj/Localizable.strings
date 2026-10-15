@@ -13,7 +13,7 @@
 "signal.short.execution" = "In corso";
 "signal.short.attention" = "Attenzione";
 "signal.short.completion" = "Completato";
-"signal.off_description" = "La retroilluminazione principale è spenta, in attesa del prossimo segnale.";
+"signal.off_description" = "Le luci controllate sono spente, in attesa della prossima attività.";
 "signal.hidden" = "Questo segnale è nascosto";
 "keyboard.illustration" = "Illustrazione della tastiera Air65 V3";
 "preview.running_short" = "Anteprima…";
@@ -75,6 +75,54 @@
 "settings.pattern" = "Effetto";
 "settings.pattern.steady" = "Fisso";
 "settings.pattern.slow_flashing" = "Lampeggio lento";
+"settings.pattern.breathing" = "Respiro";
+"settings.pattern.pulse" = "Impulso";
+"settings.pattern.color_cycle" = "Ciclo di colori";
+"settings.pattern.color_cycle_help" = "Scorre le tonalità a partire dal colore scelto.";
+"settings.lighting_preview" = "Anteprima illuminazione";
+"settings.recent_colors" = "Colori recenti";
+"settings.controlled_zones" = "Controllo Keyphore";
+"settings.zones" = "Zone di illuminazione";
+"settings.zone.backlight" = "Retroilluminazione";
+"settings.zone.strip" = "Striscia luminosa";
+"settings.manage.backlight" = "Tasti";
+"settings.manage.strip" = "Striscia";
+"settings.manage.both" = "Entrambe";
+"settings.managed" = "Controllato da Keyphore";
+"settings.unmanaged" = "Invariato";
+"settings.zone_unmanaged_detail" = "Seleziona questa zona sopra per consentire a Keyphore di controllarla.";
+"settings.native_effect" = "Effetto nativo";
+"settings.parameters" = "Parametri";
+"settings.speed" = "Velocità";
+"settings.direction" = "Direzione";
+"settings.direction.left" = "Sinistra";
+"settings.direction.right" = "Destra";
+"settings.direction.up" = "Su";
+"settings.direction.down" = "Giù";
+"settings.custom_color" = "Colore personalizzato";
+"settings.preview_approximate" = "Anteprima di colore e zona. Il movimento nativo appare sulla tastiera; gli effetti reattivi come Increspatura e Punto rispondono ai tasti.";
+"effect.spectrum" = "Spettro";
+"effect.gradient" = "Scala";
+"effect.static" = "Statico";
+"effect.breathing" = "Respiro";
+"effect.flowers" = "Fiori";
+"effect.wave" = "Onda";
+"effect.up_down_wave" = "Onda verticale";
+"effect.fountain" = "Fontana";
+"effect.galaxy" = "Galassia";
+"effect.rotation" = "Rotazione";
+"effect.ripple" = "Increspatura";
+"effect.single_point" = "Punto";
+"effect.grid" = "Griglia";
+"effect.flowing" = "Luce fluida";
+"effect.rain" = "Pioggia";
+"effect.wave_band" = "Nastro";
+"effect.gaming" = "Gaming";
+"effect.identify" = "Identifica";
+"effect.windmill" = "Mulino";
+"effect.diagonal" = "Diagonale";
+"effect.rhythm" = "Ritmo";
+"effect.neon" = "Neon";
 "settings.completion_duration" = "Durata del segnale di completamento";
 "settings.seconds" = "secondi";
 "settings.save_error" = "Impossibile salvare le impostazioni. Riprova.";
@@ -135,7 +183,7 @@
 "diagnostic.save" = "Salva ZIP diagnostico…";
 "diagnostic.save_failed" = "Impossibile salvare lo ZIP diagnostico. Prova un’altra posizione.";
 "removal.title" = "Rimuovi Keyphore";
-"removal.description" = "Keyphore spegnerà l’illuminazione dei segnali, disattiverà i propri otto Hook e rimuoverà solo i componenti gestiti elencati sotto. Gli altri Plugin, Hook, installazioni e file di Codex resteranno invariati.";
+"removal.description" = "Keyphore spegnerà l’illuminazione dei segnali, disattiverà le proprie integrazioni Agent e rimuoverà solo i componenti gestiti elencati sotto. Gli altri plugin, Hook, installazioni e file degli Agent resteranno invariati.";
 "removal.action" = "Rimuovi componenti gestiti da Keyphore…";
 "removal.confirm" = "Conferma rimozione";
 "removal.repair_title" = "Completa rimozione di Keyphore";
@@ -178,8 +226,8 @@
 "status.attention" = "Richiede attenzione";
 "status.completed" = "Attività completata";
 "status.no_signal" = "Nessun segnale di attività";
-"status.execution_detail" = "Codex sta lavorando. Non serve intervenire.";
-"status.attention_detail" = "Torna a Codex per esaminare le richieste in sospeso.";
+"status.execution_detail" = "Il tuo Agent di programmazione sta lavorando. Non serve intervenire.";
+"status.attention_detail" = "Torna al tuo Agent di programmazione per esaminare le richieste in sospeso.";
 "status.completion_detail" = "Il segnale dell’attività attuale riprende dopo questa indicazione.";
 "status.usb_connected" = "USB collegata";
 "status.waiting_for_usb" = "In attesa di USB";
@@ -213,7 +261,7 @@
 "settings.tab.lights" = "Luci";
 "settings.tab.device" = "Dispositivo";
 "settings.tab.about" = "Informazioni";
-"about.description" = "Lo stato delle attività Codex sulla tastiera.";
+"about.description" = "Lo stato delle attività degli Agent di programmazione sulla tastiera.";
 "about.version" = "Versione %@ (%@)";
 "about.website" = "Sito del progetto";
 "about.more_apps" = "Altri miei progetti";
@@ -225,6 +273,44 @@
 "about.follow_developer" = "Segui lo sviluppatore";
 
 "diagnostic.preview.pending" = "In attesa di avvio";
-"diagnostic.preview.rhythm" = "Luci ritmiche invariate";
+"diagnostic.preview.rhythm" = "Zone di illuminazione non gestite invariate";
 "diagnostic.preview.visual" = "Conferma visiva";
 "diagnostic.preview.unconfirmed" = "Non ancora confermato";
+"settings.tab.integrations" = "Agent";
+"integrations.title" = "Integrazioni Agent";
+"integrations.detail" = "Collega a Keyphore un Agent di programmazione installato.";
+"integrations.available" = "Disponibile";
+"integrations.unavailable" = "Non installato";
+"integrations.enabled" = "Attivato";
+"integrations.needs_review" = "Revisione richiesta";
+"integrations.not_enabled" = "Non attivato";
+"integrations.review" = "Rivedi";
+"integrations.review_title" = "Rivedi prima dell’attivazione";
+"integrations.events" = "Eventi";
+"integrations.files" = "File che Keyphore installerà";
+"integrations.privacy" = "Keyphore conserva solo gli identificatori del ciclo di vita e gli orari degli eventi. Prompt, risposte, trascrizioni e contenuti degli strumenti non vengono mai salvati né caricati.";
+"integrations.enable" = "Attiva integrazione";
+"integrations.remove" = "Rimuovi";
+"integrations.remove_title" = "Rimuovere l’integrazione?";
+"integrations.remove_message" = "Keyphore rimuoverà solo i propri file e la registrazione per questo Agent.";
+"integrations.cancel" = "Annulla";
+"integrations.working" = "Operazione in corso…";
+"integrations.error" = "Impossibile modificare questa integrazione. Gli altri Agent non sono stati interessati.";
+"integrations.codex_managed" = "Gestito dalla configurazione guidata di Codex";
+"integrations.pi_signals" = "Pi segnala esecuzione, completamento e annullamento. Non dispone di un evento di attenzione standardizzato.";
+
+"settings.color_presets" = "Colori predefiniti";
+
+"settings.automatic_colors" = "Questo effetto usa colori predefiniti. Non occorre scegliere un colore.";
+
+"settings.idle" = "Inattività";
+
+"settings.idle_behavior" = "Quando inattivo";
+
+"settings.idle_off" = "Spegni le luci";
+
+"settings.idle_custom" = "Luce di inattività";
+
+"settings.idle_detail" = "Usata quando non ci sono attività in corso e il segnale di completamento è terminato. Uscendo da Keyphore, le luci controllate vengono comunque spente.";
+
+"status.idle_detail" = "Nessuna attività in corso. È attiva la luce di inattività.";

@@ -23,24 +23,28 @@ public struct NuPhyIOEvidence: Equatable, Sendable {
     public let mainState: [UInt8]
     public let rhythmBefore: [UInt8]
     public let rhythmAfter: [UInt8]
+    public let unmanagedZonesPreserved: Bool
 
     public init(
         protocolReadbackSucceeded: Bool,
         visualConfirmation: VisualConfirmation,
         mainState: [UInt8],
         rhythmBefore: [UInt8],
-        rhythmAfter: [UInt8]
+        rhythmAfter: [UInt8],
+        unmanagedZonesPreserved: Bool? = nil
     ) {
         self.protocolReadbackSucceeded = protocolReadbackSucceeded
         self.visualConfirmation = visualConfirmation
         self.mainState = mainState
         self.rhythmBefore = rhythmBefore
         self.rhythmAfter = rhythmAfter
+        self.unmanagedZonesPreserved = unmanagedZonesPreserved ?? (rhythmBefore == rhythmAfter)
     }
 }
 
 public enum NuPhyIOAdapterError: Error, Equatable, Sendable {
-    case unsupportedPattern
+    case unsupportedEffect
+    case unmanagedZoneChanged(LightingZone)
     case responseTimedOut
     case invalidLightState
     case mainBacklightReadbackMismatch
@@ -75,7 +79,6 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
     }
 
     public func applyAndVerify(_ behavior: LightingBehavior) throws -> NuPhyIOEvidence {
-        let expected = try mainState(for: behavior)
         do {
             let transport = try acquireTransport()
             guard let model = connectedModel,
@@ -83,7 +86,7 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
                     ?? NuPhyLightingProfile.verified(for: model) else {
                 throw ExperimentalKeyboardError.incompatibleState
             }
-            return try applyAndVerify(expected, using: transport, profile: profile)
+            return try applyAndVerify(behavior, using: transport, profile: profile)
         } catch {
             let identity = experimentalIdentity
             invalidateTransport()
@@ -103,58 +106,85 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
     }
 
     private func applyAndVerify(
-        _ expected: [UInt8],
+        _ behavior: LightingBehavior,
         using transport: any Air65ReportTransport,
         profile: NuPhyLightingProfile,
         captureReadback: (([UInt8]) -> Void)? = nil,
         trace: ((String, [UInt8]) -> Void)? = nil
     ) throws -> NuPhyIOEvidence {
-        guard expected.count == profile.mainLength else { throw NuPhyIOAdapterError.invalidLightState }
-        let challenge = makeChallenge()
-        let key = try startTemporarySession(transport, challenge: challenge)
+        var states = try LightingZone.allCases.map { try zoneState(for: behavior.behavior(for: $0), zone: $0) }
+        let key = try startTemporarySession(transport, challenge: makeChallenge())
         let initial = try readLightState(transport, key: key, profile: profile)
         trace?("before", initial)
-
-        if !mainStateMatches(initial, expected: expected) {
-            try exchange(
-                transport,
-                request: .write(address: profile.mainAddress, payload: expected),
-                key: key
-            )
-            if let trace {
-                trace("after-main-write", try readLightState(transport, key: key, profile: profile))
+        for (index, zone) in LightingZone.allCases.enumerated() where states[index]?[1] == 0 {
+            var off = Array(initial[profile.range(for: zone)])
+            off[1] = 0
+            states[index] = off
+        }
+        var configurationStates = states
+        var brightnessWrites: [(UInt16, UInt8)] = []
+        var configurationWritten = false
+        for (index, zone) in LightingZone.allCases.enumerated() {
+            guard let requested = states[index] else { continue }
+            let range = profile.range(for: zone)
+            guard Array(initial[range]) != requested else { continue }
+            if requested[1] == 0 {
+                // An off request never queues a new mode or color configuration.
+                configurationStates[index] = Array(initial[range])
+            } else {
+                try exchange(transport, request: .write(address: UInt16(range.lowerBound), payload: requested), key: key)
+                configurationWritten = true
             }
-            if let address = profile.brightnessMirrorAddress {
-                try exchange(
-                    transport,
-                    request: .write(address: address, payload: [expected[1]]),
-                    key: key
-                )
-            }
+            brightnessWrites.append((UInt16(range.lowerBound + 1), requested[1]))
         }
-
-        let verified = try readLightState(transport, key: key, profile: profile)
-        trace?("verified", verified)
-        if let trace {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-            trace("after-250ms", try readLightState(transport, key: key, profile: profile))
+        if configurationWritten {
+            _ = try settledState(transport, key: key, profile: profile, expected: configurationStates,
+                                 initial: initial, captureReadback: captureReadback, trace: trace)
         }
-        captureReadback?(verified)
-        guard mainStateMatches(verified, expected: expected) else {
-            throw NuPhyIOAdapterError.mainBacklightReadbackMismatch
+        // NuPhyIO applies brightness separately. Applying it before the asynchronous full
+        // configuration settles can scale RGB transiently and race the pending configuration.
+        for (address, brightness) in brightnessWrites {
+            try exchange(transport, request: .write(address: address, payload: [brightness]), key: key)
         }
-        let rhythmBefore = Array(initial[profile.protectedRange])
-        let rhythmAfter = Array(verified[profile.protectedRange])
-        guard rhythmBefore == rhythmAfter else {
-            throw NuPhyIOAdapterError.rhythmLightChanged
-        }
+        let verified = try settledState(transport, key: key, profile: profile, expected: states,
+                                       initial: initial, captureReadback: captureReadback, trace: trace)
         return NuPhyIOEvidence(
-            protocolReadbackSucceeded: true,
-            visualConfirmation: .notRequested,
-            mainState: expected,
-            rhythmBefore: rhythmBefore,
-            rhythmAfter: rhythmAfter
+            protocolReadbackSucceeded: true, visualConfirmation: .notRequested,
+            mainState: Array(verified[0..<9]), rhythmBefore: Array(initial[9..<17]),
+            rhythmAfter: Array(verified[9..<17]), unmanagedZonesPreserved: true
         )
+    }
+
+    private func settledState(
+        _ transport: any Air65ReportTransport, key: NuPhySessionKey, profile: NuPhyLightingProfile,
+        expected: [[UInt8]?], initial: [UInt8], captureReadback: (([UInt8]) -> Void)?,
+        trace: ((String, [UInt8]) -> Void)?
+    ) throws -> [UInt8] {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+        func remainingSeconds() -> Double {
+            let remaining = ContinuousClock.now.duration(to: deadline).components
+            return Double(remaining.seconds) + Double(remaining.attoseconds) / 1e18
+        }
+        var matchingReads = 0
+        while true {
+            let remaining = remainingSeconds()
+            guard remaining > 0 else { throw NuPhyIOAdapterError.mainBacklightReadbackMismatch }
+            let current = try readLightState(transport, key: key, profile: profile, timeout: remaining)
+            captureReadback?(current)
+            trace?("readback", current)
+            var matches = true
+            for (zone, requested) in zip(LightingZone.allCases, expected) {
+                let range = profile.range(for: zone)
+                if let requested {
+                    matches = (Array(current[range]) == requested) && matches
+                } else if initial[range] != current[range] {
+                    throw NuPhyIOAdapterError.unmanagedZoneChanged(zone)
+                }
+            }
+            matchingReads = matches ? matchingReads + 1 : 0
+            if matchingReads == 2 { return current }
+            Thread.sleep(forTimeInterval: max(0, min(remainingSeconds(), 0.025)))
+        }
     }
 
     public func apply(_ behavior: LightingBehavior) throws {
@@ -172,21 +202,25 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
         onStep: (String) -> Void
     ) throws {
         let transport = try openAir75ForAcceptance()
-        let off: [UInt8] = [3, 0, 3, 0, 1, 0, 0, 0, 0]
-        let steps: [(String, [UInt8])] = [
-            ("blue", [3, 30, 3, 0, 1, 0, 0, 0, 255]),
-            ("orange", [3, 30, 3, 0, 1, 0, 255, 132, 0]),
-            ("green", [3, 30, 3, 0, 1, 0, 0, 255, 0]),
-            ("off", off),
+        let off = LightingBehavior.off
+        let steps: [(String, SignalColor?)] = [
+            ("blue", SignalColor(red: 0, green: 0, blue: 255)),
+            ("orange", SignalColor(red: 255, green: 132, blue: 0)),
+            ("green", SignalColor(red: 0, green: 255, blue: 0)),
+            ("off", nil),
         ]
         var lastExpected: [UInt8] = []
         var lastReadback: [UInt8] = []
         do {
             var protectedState: [UInt8]?
-            for (name, expected) in steps {
-                lastExpected = expected
+            for (name, color) in steps {
+                let behavior: LightingBehavior = color.map {
+                    LightingBehavior(backlight: .signal(ZoneAppearance(effect: .backlightStatic, color: $0,
+                                             brightness: SignalBrightness(percent: 30)!)), strip: .unmanaged)
+                } ?? .off
+                lastExpected = try zoneState(for: behavior.backlight, zone: .backlight)!
                 let evidence = try applyAndVerify(
-                    expected, using: transport,
+                    behavior, using: transport,
                     // Air75 scales RGB again when brightness is written separately.
                     profile: .air75V3,
                     captureReadback: { lastReadback = $0 }, trace: trace
@@ -219,16 +253,19 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
     }
 
     public func displays(_ behavior: LightingBehavior) throws -> Bool {
-        let expected = try mainState(for: behavior)
         do {
             let transport = try acquireTransport()
-            let challenge = makeChallenge()
-            let key = try startTemporarySession(transport, challenge: challenge)
             guard let model = connectedModel,
                   let profile = experimentalIdentity?.model.flatMap(NuPhyLightingProfile.experimental)
                     ?? NuPhyLightingProfile.verified(for: model) else { throw ExperimentalKeyboardError.incompatibleState }
+            let challenge = makeChallenge()
+            let key = try startTemporarySession(transport, challenge: challenge)
             let current = try readLightState(transport, key: key, profile: profile)
-            return mainStateMatches(current, expected: expected)
+            return try LightingZone.allCases.allSatisfy { zone in
+                guard let requested = try zoneState(for: behavior.behavior(for: zone), zone: zone) else { return true }
+                if requested[1] == 0 { return current[profile.range(for: zone).lowerBound + 1] == 0 }
+                return zoneMatches(Array(current[profile.range(for: zone)]), expected: requested)
+            }
         } catch {
             invalidateTransport()
             throw error
@@ -336,7 +373,7 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
             throw ExperimentalKeyboardError.consentRequired
         }
         let transport = try discovery.open(device)
-        return try applyAndVerify(mainState(for: behavior), using: transport, profile: profile)
+        return try applyAndVerify(behavior, using: transport, profile: profile)
     }
 
     private func startTemporarySession(
@@ -363,12 +400,13 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
     private func readLightState(
         _ transport: any Air65ReportTransport,
         key: NuPhySessionKey,
-        profile: NuPhyLightingProfile
+        profile: NuPhyLightingProfile,
+        timeout: TimeInterval = NuPhyIOAdapter.responseTimeout
     ) throws -> [UInt8] {
         let payload = try exchange(
             transport,
             request: .read(address: profile.stateAddress, length: UInt8(profile.stateLength)),
-            key: key
+            key: key, timeout: timeout
         )
         guard payload.count == profile.stateLength else {
             throw NuPhyIOAdapterError.invalidLightState
@@ -380,10 +418,11 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
     private func exchange(
         _ transport: any Air65ReportTransport,
         request: NuPhyRequest,
-        key: NuPhySessionKey
+        key: NuPhySessionKey,
+        timeout: TimeInterval = NuPhyIOAdapter.responseTimeout
     ) throws -> [UInt8] {
         try transport.send(request.encoded(using: key))
-        let deadline = Date().addingTimeInterval(Self.responseTimeout)
+        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             let remaining = max(0.001, deadline.timeIntervalSinceNow)
             guard let response = try transport.receive(timeout: remaining) else {
@@ -396,34 +435,25 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
         throw NuPhyIOAdapterError.responseTimedOut
     }
 
-    private func mainState(for behavior: LightingBehavior) throws -> [UInt8] {
+    private func zoneState(for behavior: ZoneLightingBehavior, zone: LightingZone) throws -> [UInt8]? {
         switch behavior {
+        case .unmanaged:
+            return nil
         case .off:
-            return [3, 0, 3, 0, 1, 0, 0, 0, 0]
+            return zone == .backlight ? [3, 0, 3, 0, 1, 0, 0, 0, 0] : [2, 0, 2, 0, 0, 0, 0, 0]
         case .signal(let appearance):
-            guard appearance.pattern == .steady else {
-                throw NuPhyIOAdapterError.unsupportedPattern
-            }
-            return [
-                3,
-                appearance.brightness.percent,
-                3,
-                0,
-                1,
-                0,
-                appearance.color.red,
-                appearance.color.green,
-                appearance.color.blue,
-            ]
+            guard appearance.effect.zone == zone else { throw NuPhyIOAdapterError.unsupportedEffect }
+            let flag: UInt8 = !appearance.effect.supportsColor || (appearance.effect.supportsMulticolor && appearance.colorMode == .multicolor) ? 1 : 0
+            var state = [appearance.effect.wireID, appearance.brightness.percent, 4 - appearance.speed.level]
+            if zone == .backlight { state.append(appearance.effect.directionAxis == nil ? 0 : appearance.direction.rawValue) }
+            state += [flag, 0, appearance.color.red, appearance.color.green, appearance.color.blue]
+            return state
         }
     }
 
-    private func mainStateMatches(_ state: [UInt8], expected: [UInt8]) -> Bool {
-        guard state.count >= 9, expected.count == 9 else { return false }
-        if expected[1] == 0 {
-            return state[1] == 0
-        }
-        return Array(state.prefix(9)) == expected
+    private func zoneMatches(_ state: [UInt8], expected: [UInt8]) -> Bool {
+        guard state.count == expected.count else { return false }
+        return state == expected
     }
 
     private static func randomChallenge() -> [UInt8] {
