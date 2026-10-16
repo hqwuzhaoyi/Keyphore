@@ -80,6 +80,32 @@ public enum NativeLightingEffect: String, CaseIterable, Codable, Sendable {
     case backlightRipple, backlightSinglePoint, backlightGrid, backlightFlowing, backlightRain
     case backlightWaveBand, backlightGaming, backlightIdentify, backlightWindmill, backlightDiagonal
     case stripBreathing, stripRhythm, stripFlowing, stripNeon, stripStatic
+    case viaOff, viaGradientUpDown, viaGradientLeftRight
+    case viaBandSaturation, viaBandValue, viaPinwheelSaturation, viaPinwheelValue
+    case viaSpiralSaturation, viaSpiralValue, viaCycleAll, viaCycleLeftRight, viaCycleUpDown
+    case viaRainbowMovingChevron, viaCycleOutIn, viaCycleOutInDual, viaCyclePinwheel, viaCycleSpiral
+    case viaDualBeacon, viaRainbowBeacon, viaRainbowPinwheels, viaRaindrops, viaJellybeanRaindrops
+    case viaHueBreathing, viaHuePendulum, viaHueWave, viaTypingHeatmap, viaDigitalRain
+    case viaReactiveSimple, viaReactive, viaReactiveWide, viaReactiveMultiwide
+    case viaReactiveCross, viaReactiveMulticross, viaReactiveNexus, viaReactiveMultiNexus
+    case viaSplash, viaMultiSplash, viaSolidSplash, viaSolidMultiSplash
+
+    // The supplied Air75 V2 VIA v3 definition lists these channel-3 effect IDs in order.
+    // Similar V3 names are not interchangeable wire IDs. Only existing Solid/Breathing are shared.
+    public static let viaCatalog: [NativeLightingEffect] = [
+        .viaOff, .backlightStatic, .viaGradientUpDown, .viaGradientLeftRight, .backlightBreathing,
+        .viaBandSaturation, .viaBandValue, .viaPinwheelSaturation, .viaPinwheelValue,
+        .viaSpiralSaturation, .viaSpiralValue, .viaCycleAll, .viaCycleLeftRight, .viaCycleUpDown,
+        .viaRainbowMovingChevron, .viaCycleOutIn, .viaCycleOutInDual, .viaCyclePinwheel, .viaCycleSpiral,
+        .viaDualBeacon, .viaRainbowBeacon, .viaRainbowPinwheels, .viaRaindrops, .viaJellybeanRaindrops,
+        .viaHueBreathing, .viaHuePendulum, .viaHueWave, .viaTypingHeatmap, .viaDigitalRain,
+        .viaReactiveSimple, .viaReactive, .viaReactiveWide, .viaReactiveMultiwide,
+        .viaReactiveCross, .viaReactiveMulticross, .viaReactiveNexus, .viaReactiveMultiNexus,
+        .viaSplash, .viaMultiSplash, .viaSolidSplash, .viaSolidMultiSplash,
+    ]
+
+    public var viaWireID: UInt8? { Self.viaCatalog.firstIndex(of: self).map(UInt8.init) }
+    public var isOff: Bool { self == .viaOff }
 
     public static func catalog(for zone: LightingZone) -> [NativeLightingEffect] {
         switch zone {
@@ -95,27 +121,27 @@ public enum NativeLightingEffect: String, CaseIterable, Codable, Sendable {
 
     public var zone: LightingZone { Self.catalog(for: .strip).contains(self) ? .strip : .backlight }
 
-    public var wireID: UInt8 {
+    public var wireID: UInt8? {
         switch self {
         case .stripBreathing: 3
         case .stripRhythm: 4
         case .stripFlowing: 0
         case .stripNeon: 1
         case .stripStatic: 2
-        default: UInt8(Self.catalog(for: .backlight).firstIndex(of: self)! + 1)
+        default: Self.catalog(for: .backlight).firstIndex(of: self).map { UInt8($0 + 1) }
         }
     }
 
     public var supportsColor: Bool {
-        ![Self.backlightWaveBand, .backlightDiagonal, .stripNeon].contains(self)
+        !isOff && ![Self.backlightWaveBand, .backlightDiagonal, .stripNeon].contains(self)
     }
 
     public var supportsMulticolor: Bool {
-        supportsColor && ![Self.backlightGaming, .backlightIdentify, .backlightWindmill].contains(self)
+        wireID != nil && supportsColor && ![Self.backlightGaming, .backlightIdentify, .backlightWindmill].contains(self)
     }
 
     public var supportsSpeed: Bool {
-        ![Self.backlightGradient, .backlightStatic, .stripBreathing, .stripRhythm, .stripStatic].contains(self)
+        !isOff && ![Self.backlightGradient, .backlightStatic, .stripBreathing, .stripRhythm, .stripStatic].contains(self)
     }
 
     public var directionAxis: LightingDirectionAxis? {
@@ -272,7 +298,7 @@ public struct LightingBehavior: Equatable, Sendable {
         [backlight, strip].allSatisfy {
             switch $0 {
             case .unmanaged, .off: true
-            case .signal(let appearance): appearance.brightness.percent == 0
+            case .signal(let appearance): appearance.brightness.percent == 0 || appearance.effect.isOff
             }
         }
     }
@@ -394,7 +420,7 @@ extension LocalProfile {
                      completionDisplayDuration: completionDisplayDuration, controlledZones: controlledZones)
     }
 
-    func aggregateSignal(for outcome: DurableStatusOutcome) -> AggregateSignal {
+    public func aggregateSignal(for outcome: DurableStatusOutcome) -> AggregateSignal {
         if outcome.activeSignals.contains(.attention), attention.isVisible {
             return .attention
         }

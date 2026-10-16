@@ -32,13 +32,13 @@ Concurrent tasks share one keyboard signal: **attention → working → complete
 ## Make the signals yours
 
 - **Configure backlight and strip light separately.** Each task state has independent settings for both zones. Choose whether Keyphore controls the backlight, strip light, or both; unselected zones keep their keyboard settings.
-- **Use the keyboard's native effects.** Air V3 backlight offers 20 effects and its strip light offers five, matching NuPhyIO. Brightness, speed, direction, and custom-color controls appear where the selected effect supports them.
+- **Use the keyboard's native effects.** Air V3 backlight offers 20 effects and its strip light offers five, matching NuPhyIO. Air75 V2 offers all 41 choices in its VIA definition, including All Off. Brightness, speed, direction, and custom-color controls appear where the keyboard and selected effect support them.
 - **Match colors precisely.** Use NuPhyIO's 12 preset colors, a saturation/value picker, HEX or RGB input, and recent colors. Native multicolor mode is separate from the custom color selection.
 - **See the appearance while editing.** The settings illustration works without a connected keyboard. The physical keyboard renders native effects; the illustration is an appearance guide, not an exact simulation of per-key animation.
 - **Choose how long completion stays visible.** Set it from 1–60 seconds; working and attention follow task activity.
 - **Choose what happens when idle.** In **Settings → Lighting → Idle**, select lights off or configure an independent idle effect for each controlled zone. Quitting Keyphore still turns the controlled lights off.
 - **Check the keyboard from the menu bar.** See the current signal, connection state, and a keyboard illustration; open settings without a Dock window.
-- **Preview on the actual keyboard.** Click a task-state or idle tab in lighting settings for a six-second preview, or run Device check to test and confirm all three task signals.
+- **Preview on the actual keyboard.** Click a task-state or idle tab in lighting settings for a six-second preview. Editing its color or effect restarts that preview; afterward, the keyboard returns to the current task signal. Device check tests all three task signals.
 - **Use the appearance and language you prefer.** Light, dark, or system appearance; English, Simplified Chinese, or system language.
 
 ## Compatibility
@@ -48,9 +48,13 @@ Concurrent tasks share one keyboard signal: **attention → working → complete
 | Mac | Apple Silicon · macOS 13 or later |
 | Coding tools | Codex desktop/CLI, Claude Code, Pi, OpenCode, Qoder CLI, Grok Build |
 | Keyboards | **NuPhy Air65 V3 and Air75 V3**, stock firmware, supported USB identities |
-| Connection | Wired USB · one supported keyboard at a time |
+| Connection | Wired USB · one controlled keyboard at a time, selectable when several models are connected |
 
 Air65 V3 uses USB ID `19f5:102b`; Air75 V3 uses `19f5:1028`. ISO/JIS variants, Bluetooth, 2.4 GHz receivers, Intel Macs, and custom firmware are outside current support.
+
+The **Air75 V2** driver (`19f5:3246`, VIA protocol 12) provides all 41 main-backlight choices in the supplied VIA definition: All Off plus 40 native effects, including gradients, cycles, rainbows, raindrops, heatmaps, reactive effects, and splashes. Non-Off choices expose VIA's color and speed parameters; the effect determines their visible influence, and reactive effects need physical key presses. Its [verification record](./docs/research/air75-v2-via.md) distinguishes software checks, device readback, and visual confirmation. Side lights remain controlled by the keyboard; their App controls are shown as unavailable. The driver never sends VIA Save commands. Each supported model saves its own lighting settings, so switching to V2 does not reuse or overwrite V3 effects.
+
+In **Settings → Device → Keyboard to control**, select a connected model or Automatic (only one supported keyboard connected). Keyphore remembers the choice. When the previous keyboard is connected, switching first turns off its controlled zones and verifies the result. Explicitly choosing another model releases a disconnected previous target without claiming its lights were turned off; Automatic mode retains the cleanup requirement. A disconnected selected model never falls back to another model, and multiple keyboards of the same selected model remain ambiguous. The model illustration list only changes the illustration.
 
 In **Settings → Agents**, review and enable each additional coding tool separately. Claude Code, Qoder CLI, and Grok use native plugins; Pi uses a native extension; OpenCode uses a local plugin. An approved native integration can run without Codex installed. Restart the coding tool or reload its extensions after installation. Removing one integration preserves other integrations and their active task signals.
 
@@ -136,7 +140,7 @@ For maintainers opening a development build or testing a physical keyboard, use 
 tools/keyphore-development-app build-open
 ```
 
-That workflow requires the configured signing identity and `codex-temp-guard`. It checks for an existing Companion before installing in `~/Applications/Keyphore.app`. Do not launch a development App directly from DerivedData. After hardware testing, quit through the App so it can turn the signal off and stop the Companion.
+That workflow uses a temporary build directory under `/private/tmp/codex-builds` and requires a valid signing identity. It defaults to the maintainer's Developer ID; local development can explicitly set `KEYPHORE_DEVELOPMENT_TEAM` and `KEYPHORE_SIGNING_IDENTITY` to a matching team and full Apple Development certificate name. The App, helper, and Companion must all pass strict signature checks with that identity. The workflow quits the running App normally and refuses a remaining Companion before installing in `~/Applications/Keyphore.app`. Do not launch a development App directly from DerivedData. After hardware testing, quit through the App so it can turn the signal off and stop the Companion.
 
 <details>
 <summary>Code map and validation boundaries</summary>

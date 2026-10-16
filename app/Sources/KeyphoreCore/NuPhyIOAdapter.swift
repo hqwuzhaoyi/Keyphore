@@ -11,10 +11,24 @@ public protocol Air65TransportDiscovering: AnyObject {
     func resetDiscoveryState()
 }
 
+public protocol CompanionLightingValidating: AnyObject {
+    func validate(_ behavior: LightingBehavior) throws
+}
+
+public struct LightingCapabilityError: Error, Equatable, Sendable {
+    public let model: SupportedKeyboardModel
+    public let reason: String
+}
+
 public enum VisualConfirmation: String, Codable, Equatable, Sendable {
     case notRequested
     case confirmed
     case rejected
+}
+
+public enum UnmanagedZoneProtection: String, Codable, Sendable {
+    case readback
+    case untouchedProtocolChannel
 }
 
 public struct NuPhyIOEvidence: Equatable, Sendable {
@@ -24,6 +38,7 @@ public struct NuPhyIOEvidence: Equatable, Sendable {
     public let rhythmBefore: [UInt8]
     public let rhythmAfter: [UInt8]
     public let unmanagedZonesPreserved: Bool
+    public let unmanagedZoneProtection: UnmanagedZoneProtection
 
     public init(
         protocolReadbackSucceeded: Bool,
@@ -31,7 +46,8 @@ public struct NuPhyIOEvidence: Equatable, Sendable {
         mainState: [UInt8],
         rhythmBefore: [UInt8],
         rhythmAfter: [UInt8],
-        unmanagedZonesPreserved: Bool? = nil
+        unmanagedZonesPreserved: Bool? = nil,
+        unmanagedZoneProtection: UnmanagedZoneProtection = .readback
     ) {
         self.protocolReadbackSucceeded = protocolReadbackSucceeded
         self.visualConfirmation = visualConfirmation
@@ -39,6 +55,7 @@ public struct NuPhyIOEvidence: Equatable, Sendable {
         self.rhythmBefore = rhythmBefore
         self.rhythmAfter = rhythmAfter
         self.unmanagedZonesPreserved = unmanagedZonesPreserved ?? (rhythmBefore == rhythmAfter)
+        self.unmanagedZoneProtection = unmanagedZoneProtection
     }
 }
 
@@ -53,7 +70,8 @@ public enum NuPhyIOAdapterError: Error, Equatable, Sendable {
 }
 
 public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingVerifying,
-    CompanionLightingRecovering, CompanionLightingEvidenceApplying, CompanionKeyboardIdentifying, ExperimentalKeyboardLighting
+    CompanionLightingRecovering, CompanionLightingEvidenceApplying, CompanionKeyboardIdentifying,
+    CompanionLightingValidating, CompanionKeyboardSelecting, ExperimentalKeyboardLighting
 {
     public static let responseTimeout: TimeInterval = 1
 
@@ -64,6 +82,7 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
     private var ownedDescriptor: HIDDeviceDescriptor?
     private var ownedTransport: (any Air65ReportTransport)?
     public private(set) var connectedModel: SupportedKeyboardModel?
+    public private(set) var selectedModel: SupportedKeyboardModel?
     private var discoveryNeedsReset = false
 
     public convenience init(discovery: any Air65TransportDiscovering) {
@@ -80,7 +99,10 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
 
     public func applyAndVerify(_ behavior: LightingBehavior) throws -> NuPhyIOEvidence {
         do {
-            let transport = try acquireTransport()
+            let transport = try acquireTransport(for: behavior)
+            if connectedModel == .air75V2 {
+                return try VIALightingAdapter(transport: transport).applyAndVerify(behavior)
+            }
             guard let model = connectedModel,
                   let profile = experimentalIdentity?.model.flatMap(NuPhyLightingProfile.experimental)
                     ?? NuPhyLightingProfile.verified(for: model) else {
@@ -89,7 +111,7 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
             return try applyAndVerify(behavior, using: transport, profile: profile)
         } catch {
             let identity = experimentalIdentity
-            invalidateTransport()
+            invalidateAfter(error)
             if let identity, let failure = error as? NuPhyIOAdapterError,
                failure != .responseTimedOut, let experimentalStore,
                var record = try? experimentalStore.record(for: identity), record.phase == .enabled {
@@ -103,6 +125,53 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
             }
             throw error
         }
+    }
+
+    public func validate(_ behavior: LightingBehavior) throws {
+        do {
+            _ = try acquireTransport(for: behavior)
+        } catch {
+            invalidateAfter(error)
+            throw error
+        }
+    }
+
+    private func validateBehavior(_ behavior: LightingBehavior, model: SupportedKeyboardModel?) throws {
+        if model == .air75V2 { try VIALightingAdapter.validate(behavior) }
+        else {
+            for zone in LightingZone.allCases {
+                _ = try zoneState(for: behavior.behavior(for: zone), zone: zone)
+            }
+        }
+    }
+
+    public func selectTarget(_ model: SupportedKeyboardModel?) throws {
+        try KeyboardSelectionStore.validate(model)
+        guard selectedModel != model else { return }
+        invalidateTransport()
+        selectedModel = model
+    }
+
+    public func keyboardInventory() throws -> [KeyboardInventoryEntry] {
+        resetDiscoveryIfNeeded()
+        let devices = try discovery.discover()
+        return SupportedKeyboardModel.selectableModels.compactMap { model in
+            let count = devices.filter { SupportedKeyboardModel.identify($0) == model }.count
+            return count == 0 ? nil : KeyboardInventoryEntry(model: model, count: count)
+        }
+    }
+
+    private func resetDiscoveryIfNeeded() {
+        if discoveryNeedsReset {
+            discovery.resetDiscoveryState()
+            discoveryNeedsReset = false
+        }
+    }
+
+    private func invalidateAfter(_ error: Error) {
+        invalidateTransport()
+        // A rejected configuration still identifies the connected keyboard for settings.
+        connectedModel = (error as? LightingCapabilityError)?.model
     }
 
     private func applyAndVerify(
@@ -197,6 +266,17 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
         return try readLightState(transport, key: key, profile: .air75V3)
     }
 
+    public func inspectAir75V2State() throws -> [UInt8] {
+        do {
+            let transport = try acquireTransport()
+            guard connectedModel == .air75V2 else { throw Air65DeviceSelectionError.unsupported }
+            return try VIALightingAdapter(transport: transport).inspect()
+        } catch {
+            invalidateAfter(error)
+            throw error
+        }
+    }
+
     public func previewAir75MainBacklight(
         trace: ((String, [UInt8]) -> Void)? = nil,
         onStep: (String) -> Void
@@ -254,7 +334,10 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
 
     public func displays(_ behavior: LightingBehavior) throws -> Bool {
         do {
-            let transport = try acquireTransport()
+            let transport = try acquireTransport(for: behavior)
+            if connectedModel == .air75V2 {
+                return try VIALightingAdapter(transport: transport).displays(behavior)
+            }
             guard let model = connectedModel,
                   let profile = experimentalIdentity?.model.flatMap(NuPhyLightingProfile.experimental)
                     ?? NuPhyLightingProfile.verified(for: model) else { throw ExperimentalKeyboardError.incompatibleState }
@@ -267,7 +350,7 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
                 return zoneMatches(Array(current[profile.range(for: zone)]), expected: requested)
             }
         } catch {
-            invalidateTransport()
+            invalidateAfter(error)
             throw error
         }
     }
@@ -280,7 +363,7 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
         discoveryNeedsReset = true
     }
 
-    private func acquireTransport() throws -> any Air65ReportTransport {
+    private func acquireTransport(for behavior: LightingBehavior? = nil) throws -> any Air65ReportTransport {
         if let experimentalIdentity {
             guard try experimentalStore?.record(for: experimentalIdentity)?.phase == .enabled else {
                 invalidateTransport()
@@ -293,11 +376,13 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
             }
         }
         if let ownedTransport {
-            if let experimentalStore, experimentalIdentity == nil {
+            if let behavior { try validateBehavior(behavior, model: connectedModel) }
+            if experimentalIdentity == nil {
                 let authorized = try discovery.discover().filter { device in
+                    if let selectedModel { return SupportedKeyboardModel.identify(device) == selectedModel }
                     if SupportedKeyboardModel.identify(device) != nil { return true }
                     guard let identity = ExperimentalKeyboardIdentity(device) else { return false }
-                    return (try? experimentalStore.record(for: identity)?.phase) == .enabled
+                    return (try? experimentalStore?.record(for: identity)?.phase) == .enabled
                 }
                 guard authorized.count == 1 else {
                     invalidateTransport()
@@ -310,15 +395,12 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
             }
             return ownedTransport
         }
-        if discoveryNeedsReset {
-            discovery.resetDiscoveryState()
-            discoveryNeedsReset = false
-        }
+        resetDiscoveryIfNeeded()
         let devices = try discovery.discover()
         var selected: HIDDeviceDescriptor
         do {
-            selected = try Air65DeviceSelector.select(from: devices)
-            if let experimentalStore,
+            selected = try Air65DeviceSelector.select(from: devices, preferredModel: selectedModel)
+            if selectedModel == nil, let experimentalStore,
                devices.contains(where: { device in
                    guard let identity = ExperimentalKeyboardIdentity(device) else { return false }
                    return (try? experimentalStore.record(for: identity)?.phase) == .enabled
@@ -333,15 +415,18 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
             selected = device
             experimentalIdentity = identity
         }
+        let model = SupportedKeyboardModel.identify(selected)
+            ?? experimentalIdentity?.model.map { SupportedKeyboardModel(rawValue: $0.rawValue) }
+        if let behavior { try validateBehavior(behavior, model: model) }
         let transport = try discovery.open(selected)
         ownedTransport = transport
         ownedDescriptor = selected
-        connectedModel = SupportedKeyboardModel.identify(selected)
-            ?? experimentalIdentity?.model.map { SupportedKeyboardModel(rawValue: $0.rawValue) }
+        connectedModel = model
         return transport
     }
 
     public func experimentalDevice() throws -> HIDDeviceDescriptor? {
+        guard selectedModel == nil else { return nil }
         let devices = try discovery.discover()
         let controls = devices.filter {
             $0.vendorID == 0x19f5 && $0.bus == .usb && $0.interfaceNumber == 3
@@ -442,9 +527,11 @@ public final class NuPhyIOAdapter: CompanionLightingApplying, CompanionLightingV
         case .off:
             return zone == .backlight ? [3, 0, 3, 0, 1, 0, 0, 0, 0] : [2, 0, 2, 0, 0, 0, 0, 0]
         case .signal(let appearance):
-            guard appearance.effect.zone == zone else { throw NuPhyIOAdapterError.unsupportedEffect }
+            guard appearance.effect.zone == zone, let wireID = appearance.effect.wireID else {
+                throw NuPhyIOAdapterError.unsupportedEffect
+            }
             let flag: UInt8 = !appearance.effect.supportsColor || (appearance.effect.supportsMulticolor && appearance.colorMode == .multicolor) ? 1 : 0
-            var state = [appearance.effect.wireID, appearance.brightness.percent, 4 - appearance.speed.level]
+            var state = [wireID, appearance.brightness.percent, 4 - appearance.speed.level]
             if zone == .backlight { state.append(appearance.effect.directionAxis == nil ? 0 : appearance.direction.rawValue) }
             state += [flag, 0, appearance.color.red, appearance.color.green, appearance.color.blue]
             return state

@@ -5,6 +5,32 @@ import KeyphoreCore
 
 @MainActor
 final class AppLifecycleAcceptanceTests: XCTestCase {
+    func testAppInstanceLockRejectsOverlapAndReleasesOnExit() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "app-instance.lock")
+        var first: KeyphoreAppInstanceLock? = try KeyphoreAppInstanceLock(url: url)
+        XCTAssertNotNil(first)
+        XCTAssertThrowsError(try KeyphoreAppInstanceLock(url: url)) {
+            XCTAssertEqual($0 as? KeyphoreAppInstanceLock.Failure, .alreadyRunning)
+        }
+        first = nil
+        XCTAssertNoThrow(try KeyphoreAppInstanceLock(url: url))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "Unlock must not remove the shared lock inode")
+    }
+
+    func testAppInstanceLockRejectsSymlinkWithoutTouchingTarget() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let target = directory.appending(path: "unrelated")
+        try Data("preserve".utf8).write(to: target)
+        let url = directory.appending(path: "app-instance.lock")
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: target)
+        XCTAssertThrowsError(try KeyphoreAppInstanceLock(url: url))
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "preserve")
+    }
+
     func testSelectingSignalPreviewRequestsOnlyThatSignalAndCanRestart() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -31,6 +57,264 @@ final class AppLifecycleAcceptanceTests: XCTestCase {
         XCTAssertNil(try store.load()?.requestedPreset, "Device check still requests the full diagnostic sequence")
     }
 
+    func testKeyboardTargetPickerWritesRequestAndWaitsForCompanionApplication() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let selection = KeyboardSelectionStore(url: directory.appending(path: "selection.json"))
+        let selectionSnapshot = KeyboardSelectionSnapshotStore(url: directory.appending(path: "selection-snapshot.json"))
+        let preview = SignalPreviewStore(url: directory.appending(path: "preview.json"))
+        try selectionSnapshot.save(KeyboardSelectionSnapshot(
+            desiredModel: nil,
+            activeModel: .air75V3,
+            inventory: [
+                KeyboardInventoryEntry(model: .air75V3, count: 1),
+                KeyboardInventoryEntry(model: .air75V2, count: 1),
+            ],
+            phase: .applied
+        ))
+        let health = AppMutableHealth(.connected(protocolHealthy: true, model: .air75V3))
+        let state = KeyphoreAppState(
+            lifecycle: KeyphoreLifecycle(
+                health: health,
+                profiles: AppProfile(), durableStatus: AppDurableStatus(),
+                lighting: AppLighting(), runtime: AppRecordingRuntime()
+            ),
+            previewStore: preview,
+            keyboardSelectionStore: selection,
+            keyboardSelectionSnapshotStore: selectionSnapshot
+        )
+
+        XCTAssertEqual(
+            keyboardTargetOptions(desired: state.desiredKeyboardModel, snapshot: state.keyboardSelectionSnapshot),
+            [
+                KeyboardTargetOption(model: nil, connectedCount: 2),
+                KeyboardTargetOption(model: .air75V3, connectedCount: 1),
+                KeyboardTargetOption(model: .air75V2, connectedCount: 1),
+            ]
+        )
+        XCTAssertTrue(state.keyboardSelectionAllowsPreview)
+
+        state.requestKeyboardSelection(.air75V2)
+
+        XCTAssertEqual(try selection.load(), .air75V2)
+        XCTAssertEqual(state.desiredKeyboardModel, .air75V2)
+        XCTAssertEqual(state.activeKeyboardModel, .air75V3)
+        XCTAssertEqual(keyboardSelectionStatusKey(
+            desired: state.desiredKeyboardModel,
+            snapshot: state.keyboardSelectionSnapshot,
+            failed: state.keyboardSelectionFailed
+        ), .keyboardSelectionPending)
+        XCTAssertFalse(state.keyboardSelectionAllowsPreview)
+        state.beginSignalPreview(for: .attention)
+        XCTAssertNil(try preview.load())
+
+        try selectionSnapshot.save(KeyboardSelectionSnapshot(
+            desiredModel: .air75V2,
+            activeModel: .air75V2,
+            inventory: [
+                KeyboardInventoryEntry(model: .air75V3, count: 1),
+                KeyboardInventoryEntry(model: .air75V2, count: 1),
+            ],
+            phase: .applied
+        ))
+        state.refreshKeyboardSelection()
+
+        XCTAssertEqual(state.activeKeyboardModel, .air75V2)
+        XCTAssertFalse(state.keyboardSelectionAllowsPreview, "Old V3 health must not make the routed V2 ready")
+        health.keyboard = .connected(protocolHealthy: true, model: .air75V2)
+        state.refresh()
+        XCTAssertTrue(state.keyboardSelectionAllowsPreview)
+        state.beginSignalPreview(for: .attention)
+        XCTAssertEqual(try preview.load()?.requestedPreset, .attention)
+        XCTAssertEqual(try preview.load()?.targetModel, .air75V2)
+
+        state.requestKeyboardSelection(SupportedKeyboardModel(rawValue: "Unknown keyboard"))
+        XCTAssertTrue(state.keyboardSelectionFailed)
+        XCTAssertEqual(state.desiredKeyboardModel, .air75V2)
+        XCTAssertEqual(try selection.load(), .air75V2, "Invalid Picker values must not become automatic")
+    }
+
+    func testPhysicalPreviewWorksWithoutAgentSetupAndRejectsUnavailableTargets() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let selection = KeyboardSelectionStore(url: directory.appending(path: "selection.json"))
+        let snapshots = KeyboardSelectionSnapshotStore(url: directory.appending(path: "selection-snapshot.json"))
+        let preview = SignalPreviewStore(url: directory.appending(path: "preview.json"))
+        try selection.save(.air75V2)
+        func publish(_ phase: KeyboardSelectionPhase, at time: StatusTimestamp = .now) throws {
+            try snapshots.save(KeyboardSelectionSnapshot(desiredModel: .air75V2, activeModel: .air75V2,
+                inventory: [KeyboardInventoryEntry(model: .air75V2, count: 1)], phase: phase, observedAt: time))
+        }
+        try publish(.applied)
+        let health = AppMutableHealth(.connected(protocolHealthy: true, model: .air75V2))
+        health.isConfigured = false
+        let runtime = AppRecordingRuntime()
+        let state = KeyphoreAppState(lifecycle: KeyphoreLifecycle(
+            health: health, profiles: AppProfile(), durableStatus: AppDurableStatus(),
+            lighting: AppLighting(), runtime: runtime), previewStore: preview,
+            keyboardSelectionStore: selection, keyboardSelectionSnapshotStore: snapshots)
+        XCTAssertEqual(state.menuState, .configurationRequired)
+        XCTAssertTrue(state.canPreviewLighting)
+        state.beginSignalPreview(for: .attention)
+        let record = try XCTUnwrap(preview.load(), "Physical testing must not require Agent hook configuration")
+        XCTAssertEqual(record.requestedPreset, .attention)
+        XCTAssertEqual(record.targetModel, .air75V2)
+        XCTAssertTrue(runtime.actions.isEmpty, "Physical preview must not approve hooks or start a Companion")
+        try FileManager.default.removeItem(at: preview.url)
+
+        try publish(.pending)
+        state.beginSignalPreview()
+        XCTAssertNil(try preview.load())
+        try publish(.applied)
+        health.keyboard = .disconnected
+        state.beginSignalPreview()
+        XCTAssertNil(try preview.load())
+        health.keyboard = .connected(protocolHealthy: true, model: .air75V3)
+        state.beginSignalPreview()
+        XCTAssertNil(try preview.load(), "Health from another model cannot authorize the selected V2")
+        health.keyboard = .connected(protocolHealthy: true, model: .air75V2)
+        try publish(.applied, at: .milliseconds(0))
+        state.beginSignalPreview()
+        XCTAssertNil(try preview.load(), "An expired Companion heartbeat cannot authorize physical preview")
+        XCTAssertTrue(runtime.actions.isEmpty)
+    }
+
+    func testPhysicalPreviewWaitsForSetupAndRemovalOperations() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for removing in [false, true] {
+            let preview = SignalPreviewStore(url: directory.appending(path: "preview-\(removing).json"))
+            let setup = GuidedSetup(hosts: AppHostDetector(), integration: AppSetupIntegration(),
+                                    keyboard: AppKeyboardHealth())
+            let state = KeyphoreAppState(lifecycle: KeyphoreLifecycle(
+                health: AppHealth(keyboard: .connected(protocolHealthy: true, model: .air75V2)),
+                profiles: AppProfile(), durableStatus: AppDurableStatus(),
+                lighting: AppLighting(), runtime: AppRecordingRuntime()), guidedSetup: setup,
+                previewStore: preview,
+                managedRemoval: ManagedRemoval(integration: AppManagedRemovalIntegration()))
+            XCTAssertTrue(state.canPreviewLighting)
+            if removing { state.confirmManagedRemoval() } else { state.configureAfterReview() }
+            XCTAssertTrue(removing ? state.removalIsWorking : state.setupIsWorking)
+            XCTAssertFalse(state.canPreviewLighting)
+            state.beginSignalPreview(for: .attention)
+            XCTAssertNil(try preview.load())
+            while state.setupIsWorking || state.removalIsWorking { await Task.yield() }
+        }
+    }
+
+    func testSignalSettingsReadAndWriteOnlyTheAppliedTargetProfile() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let profiles = KeyboardProfileStore(directory: directory.appending(path: "profiles"))
+        let selection = KeyboardSelectionStore(url: directory.appending(path: "selection.json"))
+        let selectionSnapshot = KeyboardSelectionSnapshotStore(url: directory.appending(path: "selection-snapshot.json"))
+        let v3 = LocalProfile.default.replacingAppearance(SignalAppearance(
+            isVisible: true,
+            backlight: ZoneAppearance(
+                effect: .backlightRipple,
+                color: SignalColor(red: 90, green: 80, blue: 70),
+                direction: .reverse
+            ),
+            strip: LocalProfile.default.execution.strip
+        ), forPreset: .execution)
+        try profiles.save(v3, for: .air75V3)
+        try profiles.save(.default, for: .air75V2)
+        try selectionSnapshot.save(KeyboardSelectionSnapshot(
+            desiredModel: nil,
+            activeModel: .air75V3,
+            inventory: [
+                KeyboardInventoryEntry(model: .air75V3, count: 1),
+                KeyboardInventoryEntry(model: .air75V2, count: 1),
+            ],
+            phase: .applied
+        ))
+        let health = AppMutableHealth(.connected(protocolHealthy: true, model: .air75V3))
+        let state = KeyphoreAppState(
+            lifecycle: KeyphoreLifecycle(
+                health: health,
+                profiles: AppKeyboardProfiles(store: profiles, selection: selectionSnapshot),
+                durableStatus: AppDurableStatus(), lighting: AppLighting(), runtime: AppRecordingRuntime()
+            ),
+            keyboardProfileStore: profiles,
+            keyboardSelectionStore: selection,
+            keyboardSelectionSnapshotStore: selectionSnapshot
+        )
+
+        XCTAssertEqual(state.profileModel, .air75V3)
+        XCTAssertEqual(state.snapshot.profile, v3)
+        XCTAssertTrue(state.keyboardProfileAllowsEditing)
+
+        state.requestKeyboardSelection(.air75V2)
+        state.updateAppearance(LocalProfile.default.attention, for: LightingPreset.execution, expectedModel: .air75V3)
+
+        XCTAssertFalse(state.keyboardProfileAllowsEditing)
+        XCTAssertTrue(state.settingsFailed)
+        XCTAssertEqual(try profiles.load(for: .air75V3), v3)
+        XCTAssertEqual(try profiles.load(for: .air75V2), .default)
+
+        try selectionSnapshot.save(KeyboardSelectionSnapshot(
+            desiredModel: .air75V2,
+            activeModel: .air75V2,
+            inventory: [
+                KeyboardInventoryEntry(model: .air75V3, count: 1),
+                KeyboardInventoryEntry(model: .air75V2, count: 1),
+            ],
+            phase: .applied
+        ))
+        health.keyboard = .connected(protocolHealthy: true, model: .air75V2)
+        state.refresh()
+
+        XCTAssertEqual(state.profileModel, .air75V2)
+        XCTAssertEqual(state.snapshot.profile, .default)
+        XCTAssertTrue(state.keyboardProfileAllowsEditing)
+
+        let v2BeforeOldCallback = try Data(contentsOf: profiles.url(for: .air75V2))
+        let v3BeforeOldCallback = try Data(contentsOf: profiles.url(for: .air75V3))
+        state.updateAppearance(LocalProfile.default.attention, for: LightingPreset.execution, expectedModel: .air75V3)
+        XCTAssertTrue(state.settingsFailed, "A delayed V3 edit must be rejected after V2 is applied")
+        XCTAssertEqual(try Data(contentsOf: profiles.url(for: .air75V2)), v2BeforeOldCallback)
+        XCTAssertEqual(try Data(contentsOf: profiles.url(for: .air75V3)), v3BeforeOldCallback)
+
+        health.keyboard = .connected(protocolHealthy: false, model: .air75V2)
+        state.refresh()
+        XCTAssertTrue(state.keyboardProfileAllowsEditing, "An unsupported profile must remain repairable")
+        XCTAssertFalse(state.keyboardSelectionAllowsPreview)
+        try Data("corrupt profile".utf8).write(to: profiles.url(for: .air75V2))
+        state.refresh()
+        XCTAssertTrue(state.validationFailed)
+        XCTAssertEqual(state.profileModel, .air75V2)
+        XCTAssertEqual(state.snapshot.profile, .default)
+        XCTAssertTrue(state.keyboardProfileAllowsEditing, "The known target may repair a corrupt profile from defaults")
+        let v2Execution = SignalAppearance(
+            isVisible: true,
+            backlight: ZoneAppearance(
+                effect: .backlightStatic,
+                color: SignalColor(red: 1, green: 2, blue: 3)
+            ),
+            strip: LocalProfile.default.execution.strip
+        )
+        state.updateAppearance(v2Execution, for: LightingPreset.execution, expectedModel: .air75V2)
+
+        XCTAssertEqual(try profiles.load(for: .air75V2).execution, v2Execution)
+        XCTAssertEqual(try profiles.load(for: .air75V3), v3)
+        XCTAssertFalse(state.settingsFailed)
+        XCTAssertFalse(state.validationFailed)
+
+        let v2BeforeStaleEdit = try Data(contentsOf: profiles.url(for: .air75V2))
+        try selectionSnapshot.save(KeyboardSelectionSnapshot(
+            desiredModel: .air75V2, activeModel: .air75V2,
+            inventory: [KeyboardInventoryEntry(model: .air75V2, count: 1)],
+            phase: .applied, observedAt: .milliseconds(0)
+        ))
+        // Do not refresh the UI first: the write itself must reject an expired disk snapshot.
+        state.updateAppearance(LocalProfile.default.completion, for: LightingPreset.execution, expectedModel: .air75V2)
+        XCTAssertTrue(state.settingsFailed)
+        XCTAssertEqual(try Data(contentsOf: profiles.url(for: .air75V2)), v2BeforeStaleEdit)
+        XCTAssertEqual(try Data(contentsOf: profiles.url(for: .air75V3)), v3BeforeOldCallback)
+        state.refresh()
+        XCTAssertFalse(state.keyboardProfileAllowsEditing)
+    }
+
     func testDisconnectedKeyboardDoesNotQueueSelectedSignalPreview() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -46,31 +330,120 @@ final class AppLifecycleAcceptanceTests: XCTestCase {
         XCTAssertNil(try store.load())
     }
 
+    func testEditingAnExpiredPresetRenewsItsTargetBoundPhysicalPreview() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let profiles = KeyboardProfileStore(directory: directory.appending(path: "profiles"))
+        let selection = KeyboardSelectionStore(url: directory.appending(path: "selection.json"))
+        let snapshots = KeyboardSelectionSnapshotStore(url: directory.appending(path: "selection-snapshot.json"))
+        let preview = SignalPreviewStore(url: directory.appending(path: "preview.json"))
+        let status = DurableStatusStore(url: directory.appending(path: "status.json"))
+        try profiles.save(.default, for: .air75V2)
+        try selection.save(.air75V2)
+        try snapshots.save(KeyboardSelectionSnapshot(desiredModel: .air75V2, activeModel: .air75V2,
+            inventory: [KeyboardInventoryEntry(model: .air75V2, count: 1)], phase: .applied))
+        try status.recordSignal(ownerID: SignalOwnerID(product: "codex", sessionID: "preview-edit", agentID: "main"),
+            turnID: "turn", signal: .execution, expiresAt: .milliseconds(100_000),
+            replacingSession: true, lockBudget: .milliseconds(100))
+        let health = AppMutableHealth(.connected(protocolHealthy: true, model: .air75V2))
+        let state = KeyphoreAppState(lifecycle: KeyphoreLifecycle(
+            health: health, profiles: AppProfile(), durableStatus: AppDurableStatus(outcome: .execution),
+            lighting: AppLighting(), runtime: AppRecordingRuntime()), keyboardProfileStore: profiles,
+            previewStore: preview, keyboardSelectionStore: selection, keyboardSelectionSnapshotStore: snapshots)
+        let lighting = AppPreviewLighting()
+        let companion = KeyphoreCompanion(store: status,
+            profileProvider: { try profiles.load(for: XCTUnwrap($0)) }, lighting: lighting,
+            previewStore: preview,
+            ownershipStore: LightingOwnershipStore(url: directory.appending(path: "ownership.json")),
+            selectionStore: selection)
+        try companion.sync(at: .milliseconds(0))
+        state.beginSignalPreview(for: .completion)
+        let first = try XCTUnwrap(preview.load())
+        try companion.sync(at: .milliseconds(100))
+        let started = try XCTUnwrap(preview.load()?.stageStartedAt).millisecondsSince1970
+        try companion.sync(at: .milliseconds(started + 6_000))
+        XCTAssertEqual(try preview.load()?.phase, .completed)
+        XCTAssertEqual(lighting.behaviors.last, .signal(LocalProfile.default.execution))
+
+        let edited = LocalProfile.default.completion.replacingAppearance(ZoneAppearance(
+            effect: .backlightStatic, color: SignalColor(red: 255, green: 109, blue: 30)), for: .backlight)
+        state.updateAppearance(edited, for: LightingPreset.completion, expectedModel: .air75V2)
+        XCTAssertEqual(try profiles.load(for: .air75V2).completion, edited)
+        let renewed = try XCTUnwrap(preview.load())
+        XCTAssertNotEqual(renewed.id, first.id)
+        XCTAssertEqual(renewed.phase, .pending)
+        XCTAssertEqual(renewed.requestedPreset, .completion)
+        XCTAssertEqual(renewed.targetModel, .air75V2)
+        try companion.sync(at: .milliseconds(started + 6_100))
+        XCTAssertEqual(lighting.behaviors.last, .signal(edited), "The edit must override live execution during its preview")
+        XCTAssertEqual(try preview.load()?.phase, .presenting)
+        let restarted = try XCTUnwrap(preview.load()?.stageStartedAt).millisecondsSince1970
+        try companion.sync(at: .milliseconds(restarted + 6_000))
+        XCTAssertEqual(lighting.behaviors.last, .signal(LocalProfile.default.execution))
+        XCTAssertEqual(try preview.load()?.phase, .completed)
+
+        let completed = try XCTUnwrap(preview.load())
+        let savedProfile = try Data(contentsOf: profiles.url(for: .air75V2))
+        try snapshots.save(KeyboardSelectionSnapshot(desiredModel: .air75V2, activeModel: .air75V2,
+            inventory: [.init(model: .air75V2, count: 1)], phase: .applied, observedAt: .milliseconds(0)))
+        state.updateAppearance(.init(isVisible: false, backlight: edited.backlight, strip: edited.strip),
+                               for: LightingPreset.completion, expectedModel: .air75V2)
+        XCTAssertTrue(state.settingsFailed)
+        XCTAssertEqual(try Data(contentsOf: profiles.url(for: .air75V2)), savedProfile)
+        XCTAssertEqual(try preview.load()?.id, completed.id, "A refused save must not renew preview")
+
+        // The target may change after the save but before the preview entry refreshes its state.
+        state.requestKeyboardSelection(.air75V3)
+        try snapshots.save(KeyboardSelectionSnapshot(desiredModel: .air75V3, activeModel: .air75V3,
+            inventory: [.init(model: .air75V3, count: 1)], phase: .applied))
+        health.keyboard = .connected(protocolHealthy: true, model: .air75V3)
+        state.beginSignalPreview(for: .completion, expectedModel: .air75V2)
+        XCTAssertEqual(try preview.load()?.id, completed.id, "A V2 edit must not preview on the refreshed V3 target")
+        state.beginSignalPreview(for: .completion)
+        XCTAssertEqual(try preview.load()?.targetModel, .air75V3, "A separate explicit V3 preview is still available")
+    }
+
     func testFailedIdleProfileWriteDoesNotPreviewStaleSettingsOrHideTheFailure() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+        let profiles = KeyboardProfileStore(directory: directory.appending(path: "profiles"))
+        let selection = KeyboardSelectionStore(url: directory.appending(path: "selection.json"))
+        let selectionSnapshot = KeyboardSelectionSnapshotStore(url: directory.appending(path: "selection-snapshot.json"))
+        try selectionSnapshot.save(KeyboardSelectionSnapshot(
+            desiredModel: nil, activeModel: .air75V3,
+            inventory: [KeyboardInventoryEntry(model: .air75V3, count: 1)], phase: .applied
+        ))
         let preview = SignalPreviewStore(url: directory.appending(path: "preview.json"))
         let state = KeyphoreAppState(
             lifecycle: KeyphoreLifecycle(
-                health: AppHealth(keyboard: .connected(protocolHealthy: true)), profiles: AppProfile(),
+                health: AppHealth(keyboard: .connected(protocolHealthy: true, model: .air75V3)),
+                profiles: AppKeyboardProfiles(store: profiles, selection: selectionSnapshot),
                 durableStatus: AppDurableStatus(), lighting: AppLighting(), runtime: AppRecordingRuntime()
             ),
-            profileStore: LocalProfileStore(url: directory),
-            previewStore: preview
+            keyboardProfileStore: profiles, previewStore: preview,
+            keyboardSelectionStore: selection,
+            keyboardSelectionSnapshotStore: selectionSnapshot
         )
+        try Data("block profile directory".utf8).write(to: profiles.directory)
         let idle = SignalAppearance(
             isVisible: true, backlight: LocalProfile.defaultIdle.backlight,
             strip: LocalProfile.defaultIdle.strip
         )
 
-        state.updateAppearance(idle, for: LightingPreset.idle)
+        state.updateAppearance(idle, for: LightingPreset.idle, expectedModel: .air75V3)
 
         XCTAssertTrue(state.settingsFailed)
         XCTAssertNil(try preview.load())
         XCTAssertEqual(state.snapshot.profile, .default)
+        for preset in [LightingPreset.execution, .attention, .completion] {
+            state.updateAppearance(LocalProfile.default.appearance(forPreset: preset),
+                                   for: preset, expectedModel: .air75V3)
+            XCTAssertTrue(state.settingsFailed)
+            XCTAssertNil(try preview.load(), "A failed save must not preview any preset")
+        }
 
-        XCTAssertFalse(state.updateControlledZones(.both))
+        XCTAssertFalse(state.updateControlledZones(.both, expectedModel: .air75V3))
         XCTAssertTrue(state.settingsFailed)
         XCTAssertNil(try preview.load())
     }
@@ -117,6 +490,57 @@ final class AppLifecycleAcceptanceTests: XCTestCase {
         XCTAssertTrue(runtime.actions.isEmpty)
         while state.removalIsWorking { await Task.yield() }
         XCTAssertTrue(state.prepareToQuit())
+    }
+
+    func testExplicitReopenShowsKeySettingsWindowAndReopensItAfterClosing() async throws {
+        let application = NSApplication.shared
+        let previousPolicy = application.activationPolicy()
+        XCTAssertTrue(application.setActivationPolicy(.accessory), "Match the menu-bar App's activation policy")
+        if !NSRunningApplication.current.isFinishedLaunching { application.finishLaunching() }
+        let existingWindows = Set(application.windows.map(ObjectIdentifier.init))
+        let runtime = AppRecordingRuntime()
+        let delegate = KeyphoreAppDelegate(state: makeState(runtime: runtime))
+        defer {
+            for window in application.windows where !existingWindows.contains(ObjectIdentifier(window)) {
+                window.close()
+            }
+            application.setActivationPolicy(previousPolicy)
+        }
+
+        XCTAssertFalse(delegate.applicationShouldHandleReopen(application, hasVisibleWindows: false))
+        let window = try XCTUnwrap(application.windows.first {
+            !existingWindows.contains(ObjectIdentifier($0)) && $0.title == AppCopy.value(.settings)
+        }, "An explicit open must create a stable settings window, even without a menu-bar popover anchor")
+        for _ in 0..<100 where !window.isKeyWindow {
+            while let event = application.nextEvent(matching: .any, until: .distantPast,
+                                                    inMode: .default, dequeue: true) {
+                application.sendEvent(event)
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(window.isVisible)
+        XCTAssertTrue(window.isKeyWindow, "Settings must become key; active=\(application.isActive), policy=\(application.activationPolicy().rawValue)")
+        XCTAssertTrue(runtime.actions.isEmpty, "Showing settings must not restart the Companion or change hooks")
+
+        window.close()
+        XCTAssertFalse(window.isVisible)
+        XCTAssertFalse(delegate.applicationShouldHandleReopen(application, hasVisibleWindows: false))
+        for _ in 0..<100 where !window.isKeyWindow {
+            while let event = application.nextEvent(matching: .any, until: .distantPast,
+                                                    inMode: .default, dequeue: true) {
+                application.sendEvent(event)
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(window.isVisible, "A closed settings window must be shown again on explicit open")
+        XCTAssertTrue(window.isKeyWindow, "Settings must become key; active=\(application.isActive), policy=\(application.activationPolicy().rawValue)")
+        XCTAssertEqual(application.windows.filter {
+            !existingWindows.contains(ObjectIdentifier($0)) && $0.title == AppCopy.value(.settings)
+        }.count, 1, "Reopen should reuse the retained settings window")
+        XCTAssertFalse(delegate.applicationShouldHandleReopen(application, hasVisibleWindows: true))
+        XCTAssertTrue(window.isVisible)
+        XCTAssertTrue(window.isKeyWindow, "Settings must become key; active=\(application.isActive), policy=\(application.activationPolicy().rawValue)")
+        XCTAssertTrue(runtime.actions.isEmpty)
     }
 
     func testStatusMenuOpensAboutInSharedSettingsSelection() {
@@ -232,13 +656,23 @@ final class AppLifecycleAcceptanceTests: XCTestCase {
     func testResettingSignalColorPersistsWithoutResettingOtherSignalSettings() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let store = LocalProfileStore(url: directory.appending(path: "profile.json"))
+        let store = KeyboardProfileStore(directory: directory.appending(path: "profiles"))
+        let selection = KeyboardSelectionStore(url: directory.appending(path: "selection.json"))
+        let selectionSnapshot = KeyboardSelectionSnapshotStore(url: directory.appending(path: "selection-snapshot.json"))
+        try selectionSnapshot.save(KeyboardSelectionSnapshot(
+            desiredModel: nil, activeModel: .air75V3,
+            inventory: [KeyboardInventoryEntry(model: .air75V3, count: 1)], phase: .applied
+        ))
+        let preview = SignalPreviewStore(url: directory.appending(path: "preview.json"))
         let state = KeyphoreAppState(
             lifecycle: KeyphoreLifecycle(
-                health: AppHealth(), profiles: PersistedAppProfile(store: store),
+                health: AppHealth(keyboard: .connected(protocolHealthy: true, model: .air75V3)),
+                profiles: AppKeyboardProfiles(store: store, selection: selectionSnapshot),
                 durableStatus: AppDurableStatus(), lighting: AppLighting(), runtime: AppRecordingRuntime()
             ),
-            profileStore: store
+            keyboardProfileStore: store, previewStore: preview,
+            keyboardSelectionStore: selection,
+            keyboardSelectionSnapshotStore: selectionSnapshot
         )
         let custom = SignalAppearance(
             isVisible: false,
@@ -253,13 +687,20 @@ final class AppLifecycleAcceptanceTests: XCTestCase {
             isVisible: true, backlight: LocalProfile.defaultIdle.backlight,
             strip: LocalProfile.defaultIdle.strip
         )
-        state.updateControlledZones(.both)
-        state.updateAppearance(customIdle, for: LightingPreset.idle)
-        state.updateAppearance(custom, for: CodexSignal.completion)
-        state.updateCompletionDisplayDuration(CompletionDisplayDuration(seconds: 12)!)
-        state.resetSignalColor(for: .completion, zone: .backlight)
+        state.updateControlledZones(.both, expectedModel: .air75V3)
+        state.updateAppearance(customIdle, for: LightingPreset.idle, expectedModel: .air75V3)
+        state.updateAppearance(custom, for: CodexSignal.completion, expectedModel: .air75V3)
+        state.updateCompletionDisplayDuration(
+            CompletionDisplayDuration(seconds: 12)!, expectedModel: .air75V3
+        )
+        let beforeReset = try XCTUnwrap(preview.load())
+        XCTAssertEqual(beforeReset.requestedPreset, .completion, "The CodexSignal overload must use the shared preview path")
+        state.resetSignalColor(for: .completion, zone: .backlight, expectedModel: .air75V3)
+        XCTAssertNotEqual(try preview.load()?.id, beforeReset.id)
+        XCTAssertEqual(try preview.load()?.requestedPreset, .completion)
+        XCTAssertEqual(try preview.load()?.targetModel, .air75V3)
 
-        let reopened = try LocalProfileStore(url: store.url).load()
+        let reopened = try store.load(for: .air75V3)
         XCTAssertEqual(reopened.completion.backlight.color, LocalProfile.default.completion.backlight.color)
         XCTAssertEqual(reopened.completion.backlight.brightness.percent, 42)
         XCTAssertEqual(reopened.completion.backlight.effect, .backlightWave)
@@ -509,17 +950,30 @@ private struct AppHealth: KeyphoreHealthProviding {
     func currentHealth() -> KeyphoreHealth { .configured(keyboard: keyboard) }
 }
 
+private final class AppMutableHealth: KeyphoreHealthProviding {
+    var keyboard: KeyboardHealth
+    var isConfigured = true
+    init(_ keyboard: KeyboardHealth) { self.keyboard = keyboard }
+    func currentHealth() -> KeyphoreHealth { KeyphoreHealth(isConfigured: isConfigured, keyboard: keyboard) }
+}
+
 private struct AppProfile: LocalProfileProviding {
     func currentProfile() -> LocalProfile { .default }
 }
 
-private struct PersistedAppProfile: LocalProfileProviding {
-    let store: LocalProfileStore
-    func currentProfile() -> LocalProfile { store.loadOrDefault() }
+private struct AppKeyboardProfiles: LocalProfileProviding {
+    let store: KeyboardProfileStore
+    let selection: KeyboardSelectionSnapshotStore
+    func currentProfile() -> LocalProfile {
+        guard let snapshot = selection.load(), snapshot.phase == .applied,
+              let model = snapshot.activeModel else { return .default }
+        return (try? store.load(for: model)) ?? .default
+    }
 }
 
 private struct AppDurableStatus: DurableStatusProviding {
-    func currentOutcome() -> DurableStatusOutcome { .signalOff }
+    var outcome: DurableStatusOutcome = .signalOff
+    func currentOutcome() -> DurableStatusOutcome { outcome }
 }
 
 private final class AppLighting: LightingEmitting {
@@ -578,4 +1032,17 @@ private final class AppManagedRemovalIntegration: ManagedRemovalIntegrating {
     func removeLocalProfileAndManagedRuntimeState() { actions.append(.state) }
     func verifyManagedRemoval() -> Bool { actions.append(.verify); return true }
     func completeManagedRemoval() { actions.append(.complete); status = .completed }
+}
+
+private final class AppPreviewLighting: CompanionLightingEvidenceApplying, CompanionKeyboardSelecting {
+    var connectedModel: SupportedKeyboardModel?
+    var behaviors: [LightingBehavior] = []
+    func keyboardInventory() -> [KeyboardInventoryEntry] { [.init(model: .air75V2, count: 1)] }
+    func selectTarget(_ model: SupportedKeyboardModel?) { connectedModel = model }
+    func apply(_ behavior: LightingBehavior) throws { _ = try applyAndVerify(behavior) }
+    func applyAndVerify(_ behavior: LightingBehavior) throws -> NuPhyIOEvidence {
+        behaviors.append(behavior)
+        return NuPhyIOEvidence(protocolReadbackSucceeded: true, visualConfirmation: .notRequested,
+                               mainState: [], rhythmBefore: [], rhythmAfter: [])
+    }
 }

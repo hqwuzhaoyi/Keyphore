@@ -1,15 +1,44 @@
 import AppKit
 import SwiftUI
 import Combine
+import Darwin
 import KeyphoreCore
 
 @MainActor
 final class KeyphoreAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let state: KeyphoreAppState
+    private var instanceLock: KeyphoreAppInstanceLock?
 
     override init() {
+        // Claim the runtime before state initialization can register a Companion or inspect hooks.
+        do {
+            instanceLock = try KeyphoreAppInstanceLock(url: KeyphoreRuntimePaths.supportDirectory()
+                .appending(path: "app-instance.lock"))
+        } catch KeyphoreAppInstanceLock.Failure.alreadyRunning {
+            _ = Self.activateExistingInstance()
+            exit(EXIT_SUCCESS)
+        } catch {
+            NSLog("Keyphore could not claim its App instance: %@", String(describing: error))
+            exit(EXIT_FAILURE)
+        }
+        // A previously installed version may not participate in the instance lock yet.
+        if Self.activateExistingInstance(outside: Bundle.main.bundleURL.resolvingSymlinksInPath()) { exit(EXIT_SUCCESS) }
         state = KeyphoreAppState()
         super.init()
+    }
+
+    private static func activateExistingInstance(outside currentBundle: URL? = nil) -> Bool {
+        guard let existing = NSRunningApplication.runningApplications(withBundleIdentifier: "com.barrywu.keyphore")
+            .first(where: {
+                $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && !$0.isTerminated
+                    && (currentBundle == nil || $0.bundleURL?.resolvingSymlinksInPath() != currentBundle)
+            }) else {
+            return false
+        }
+        existing.activate(options: [])
+        // Activation alone does not deliver the reopen event that reveals the settings window.
+        if let url = existing.bundleURL { _ = NSWorkspace.shared.open(url) }
+        return true
     }
 
     init(state: KeyphoreAppState) {
@@ -189,7 +218,7 @@ final class KeyphoreAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showStatusPopover()
+        showSettings()
         return false
     }
 
@@ -200,4 +229,28 @@ final class KeyphoreAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
 
 private enum ManagedUpdatePreparationError: Error {
     case runtimeUnavailable
+}
+
+// The descriptor stays alive for the App lifetime; never unlink a lock that another process may hold.
+final class KeyphoreAppInstanceLock {
+    enum Failure: Error, Equatable {
+        case alreadyRunning
+        case unavailable(Int32)
+    }
+
+    private let descriptor: Int32
+
+    init(url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let descriptor = open(url.path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw Failure.unavailable(errno) }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let code = errno
+            close(descriptor)
+            throw code == EWOULDBLOCK ? Failure.alreadyRunning : Failure.unavailable(code)
+        }
+        self.descriptor = descriptor
+    }
+
+    deinit { close(descriptor) }
 }

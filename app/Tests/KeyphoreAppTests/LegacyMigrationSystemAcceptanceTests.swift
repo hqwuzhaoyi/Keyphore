@@ -371,6 +371,15 @@ final class LegacyMigrationSystemAcceptanceTests: XCTestCase {
         let fixture = try LegacyMigrationFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try fixture.prepareCurrentInstallation()
+        let selectionFiles = [
+            KeyphoreRuntimePaths.keyboardSelectionURL(homeDirectory: fixture.home),
+            KeyphoreRuntimePaths.keyboardSelectionSnapshotURL(homeDirectory: fixture.home),
+        ]
+        for url in selectionFiles { try Data("{}".utf8).write(to: url) }
+        let profiles = KeyboardProfileStore(directory:
+            KeyphoreRuntimePaths.keyboardProfilesDirectory(homeDirectory: fixture.home))
+        try profiles.save(.default, for: .air75V2)
+        try profiles.save(.default, for: .air75V3)
         let unrelatedUserFile = fixture.home.appending(path: "Documents/preserved.txt")
         try FileManager.default.createDirectory(
             at: unrelatedUserFile.deletingLastPathComponent(),
@@ -406,6 +415,8 @@ final class LegacyMigrationSystemAcceptanceTests: XCTestCase {
         let snapshot = try ManagedRemoval(integration: integration).removeAfterConfirmation()
 
         XCTAssertEqual(snapshot.status, .completed)
+        for url in selectionFiles { XCTAssertFalse(FileManager.default.fileExists(atPath: url.path)) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: profiles.directory.path))
         XCTAssertFalse(loginLaunch.isEnabled)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.currentService.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.currentLaunchAgent.path))

@@ -50,7 +50,7 @@ final class LocalProfilePersistenceTests: XCTestCase {
         )
         let hook = ProductionHookHandler(
             store: statusStore,
-            profileProvider: { try fixture.store.load() }
+            completionDurationProvider: { try fixture.store.load().completionDisplayDuration }
         )
 
         try hook.handle(
@@ -69,7 +69,7 @@ final class LocalProfilePersistenceTests: XCTestCase {
         let statusStore = DurableStatusStore(url: fixture.directory.appending(path: "status.json"))
         let hook = ProductionHookHandler(
             store: statusStore,
-            profileProvider: { fixture.store.loadOrDefault() }
+            completionDurationProvider: { fixture.store.loadOrDefault().completionDisplayDuration }
         )
 
         try hook.handle(

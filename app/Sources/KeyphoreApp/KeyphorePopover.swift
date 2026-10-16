@@ -77,11 +77,13 @@ struct KeyphorePopover: View {
                            ? 344 / CandidateKeyboardIllustration(model: candidateModels[0]).aspectRatio : 280)
                     .padding(.bottom, 18)
                 } else {
+                    let layout = keyboardLayout(for: state.snapshot.keyboardHealth.model)
                     Air65KeyboardView(
                         presentation: presentation,
-                        layout: state.snapshot.keyboardHealth.model == .air75V3 ? .air75ANSI : .air65
+                        layout: layout,
+                        model: state.snapshot.keyboardHealth.model
                     )
-                    .frame(width: 344, height: 344 * (state.snapshot.keyboardHealth.model == .air75V3 ? 186 : 160) / 416)
+                    .frame(width: 344, height: 344 * layout.height / 416)
                     .padding(.bottom, 18)
                 }
 
@@ -219,7 +221,7 @@ struct SignalPreviewFeedback: View {
                 Button(AppCopy.value(state.previewRecord == nil ? .deviceCheckStart : .deviceCheckRetry)) {
                     state.beginSignalPreview()
                 }
-                    .disabled(state.menuState != .ready || state.previewRecord?.phase == .pending
+                    .disabled(!state.canPreviewLighting || state.previewRecord?.phase == .pending
                               || state.previewRecord?.phase == .presenting
                               || state.previewRecord?.phase == .awaitingVisualConfirmation)
             }

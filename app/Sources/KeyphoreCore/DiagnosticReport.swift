@@ -91,13 +91,17 @@ public struct DiagnosticReport: Codable, Equatable, Sendable {
             func result(_ passed: Bool) -> String {
                 text(passed ? .diagnosticHealthy : unfinished ? .diagnosticNotAvailable : .diagnosticFailed)
             }
+            let zoneEvidence = record.unmanagedZoneProtection == .untouchedProtocolChannel
+                ? "\(text(.diagnosticPreviewUntouched)): \(record.unmanagedZonesPreserved ? text(.diagnosticChannelIsolation) : result(false))"
+                : "\(text(.diagnosticPreviewRhythm)): \(result(record.unmanagedZonesPreserved))"
             return [
                 text(.deviceCheckRecent),
                 Date(timeIntervalSince1970: Double(record.requestedAt.millisecondsSince1970) / 1000)
                     .formatted(Date.FormatStyle(date: .numeric, time: .standard).locale(Locale(identifier: language.rawValue))),
                 text(phase),
+                "\(text(.diagnosticFieldKeyboard)): \(record.targetModel?.rawValue ?? text(.diagnosticNotAvailable))",
                 "\(text(.diagnosticFieldProtocol)): \(result(record.protocolReadbackSucceeded))",
-                "\(text(.diagnosticPreviewRhythm)): \(result(record.unmanagedZonesPreserved))",
+                zoneEvidence,
                 "\(text(.diagnosticPreviewVisual)): \(text(confirmation))",
             ]
         }

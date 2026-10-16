@@ -16,7 +16,8 @@ let package = Package(
         ),
         .testTarget(
             name: "KeyphoreCoreTests",
-            dependencies: ["KeyphoreCore"]
+            dependencies: ["KeyphoreCore"],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

@@ -32,19 +32,20 @@ struct KeyboardSignalPresentation {
             }
         }
         isControlAvailable = snapshot.menuState == .ready
+        controlledZones = snapshot.profile.controlledZones
         isLit = isControlAvailable
             && appearance?.isVisible == true
+            && Self.hasLitZone(appearance, controlledZones: controlledZones)
             && (!isPreviewing || preview?.presentationIsLit == true)
-        controlledZones = snapshot.profile.controlledZones
     }
 
     init(signal: AggregateSignal, appearance: SignalAppearance, controlledZones: ControlledZones) {
         self.signal = signal
         self.appearance = appearance
         isControlAvailable = true
-        isLit = appearance.isVisible
         isPreviewing = false
         self.controlledZones = controlledZones
+        isLit = appearance.isVisible && Self.hasLitZone(appearance, controlledZones: controlledZones)
     }
 
     func color(for zone: LightingZone) -> Color {
@@ -53,7 +54,16 @@ struct KeyboardSignalPresentation {
 
     func opacity(for zone: LightingZone) -> Double {
         guard isLit, controlledZones.contains(zone), let appearance else { return 0 }
-        return Double(appearance.appearance(for: zone).brightness.percent) / 100
+        let zoneAppearance = appearance.appearance(for: zone)
+        guard !zoneAppearance.effect.isOff else { return 0 }
+        return Double(zoneAppearance.brightness.percent) / 100
+    }
+
+    private static func hasLitZone(
+        _ appearance: SignalAppearance?, controlledZones: ControlledZones
+    ) -> Bool {
+        guard let appearance else { return false }
+        return !LightingBehavior.signal(appearance, controlledZones: controlledZones).isOff
     }
 }
 
@@ -61,25 +71,26 @@ extension AggregateSignal {
     func presentation(in profile: LocalProfile) -> AggregateSignalPresentation {
         switch self {
         case .signalOff:
-            AggregateSignalPresentation(
-                copyKey: profile.idle.isVisible ? .settingsIdle : .signalOff,
+            let idleIsLit = !LightingBehavior.signal(profile.idle, controlledZones: profile.controlledZones).isOff
+            return AggregateSignalPresentation(
+                copyKey: idleIsLit ? .settingsIdle : .signalOff,
                 signal: self,
                 color: profile.idle.backlight.color.swiftUIColor
             )
         case .execution:
-            AggregateSignalPresentation(
+            return AggregateSignalPresentation(
                 copyKey: .execution,
                 signal: self,
                 color: profile.execution.backlight.color.swiftUIColor
             )
         case .attention:
-            AggregateSignalPresentation(
+            return AggregateSignalPresentation(
                 copyKey: .attention,
                 signal: self,
                 color: profile.attention.backlight.color.swiftUIColor
             )
         case .completion:
-            AggregateSignalPresentation(
+            return AggregateSignalPresentation(
                 copyKey: .completion,
                 signal: self,
                 color: profile.completion.backlight.color.swiftUIColor

@@ -76,14 +76,14 @@ public final class AgentHookHandler {
     private let quitGate: QuitGateStore
     private let lockBudget: Duration
     private let invokedByGrok: Bool
-    private let profileProvider: () throws -> LocalProfile
+    private let completionDurationProvider: () throws -> CompletionDisplayDuration
 
     public init(
         store: DurableStatusStore, source: AgentSource,
         consentStore: AgentIntegrationConsentStore, runtimeURL: URL, quitGate: QuitGateStore,
         lockBudget: Duration = .milliseconds(100),
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        profileProvider: @escaping () throws -> LocalProfile = { .default }
+        completionDurationProvider: @escaping () throws -> CompletionDisplayDuration = { .fiveSeconds }
     ) {
         self.store = store
         self.source = source
@@ -92,7 +92,7 @@ public final class AgentHookHandler {
         self.quitGate = quitGate
         self.lockBudget = lockBudget
         self.invokedByGrok = environment["GROK_PLUGIN_ROOT"] != nil
-        self.profileProvider = profileProvider
+        self.completionDurationProvider = completionDurationProvider
     }
 
     public func handle(_ input: Data, receivedAt: StatusTimestamp = .now) throws {
@@ -101,7 +101,7 @@ public final class AgentHookHandler {
               !quitGate.isActive, consentStore.isApproved(source: source, runtimeURL: runtimeURL) else { return }
         guard let event = try AgentHookNormalizer.normalize(input, source: source) else { return }
         try store.apply(event, at: receivedAt,
-                        completionLifetime: .seconds(Int64(try profileProvider().completionDisplayDuration.seconds)),
+                        completionLifetime: .seconds(Int64(try completionDurationProvider().seconds)),
                         lockBudget: lockBudget, isAuthorized: {
                             !self.quitGate.isActive
                                 && self.consentStore.isApproved(source: self.source, runtimeURL: self.runtimeURL)
