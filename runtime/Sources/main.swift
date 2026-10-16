@@ -14,14 +14,27 @@ case "hook":
     guard input.count <= 1_048_576 else {
         exit(1)
     }
-    guard
-        (try? ProductionHookHandler(
-            store: store,
-            quitGate: QuitGateStore(url: KeyphoreRuntimePaths.quitGateURL()),
-            configuredStateURL: KeyphoreRuntimePaths.configuredStateURL(),
-            profileProvider: { profileStore.loadOrDefault() }
-        ).handle(input)) != nil
-    else {
+    do {
+        if let sourceName = arguments.dropFirst().first {
+            guard arguments.count == 2, let source = AgentSource(rawValue: sourceName), source != .codex else {
+                exit(64)
+            }
+            try AgentHookHandler(
+                store: store, source: source,
+                consentStore: AgentIntegrationConsentStore(url: KeyphoreRuntimePaths.agentIntegrationsURL()),
+                runtimeURL: Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]),
+                quitGate: QuitGateStore(url: KeyphoreRuntimePaths.quitGateURL()),
+                profileProvider: { profileStore.loadOrDefault() }
+            ).handle(input)
+        } else {
+            try ProductionHookHandler(
+                store: store,
+                quitGate: QuitGateStore(url: KeyphoreRuntimePaths.quitGateURL()),
+                configuredStateURL: KeyphoreRuntimePaths.configuredStateURL(),
+                profileProvider: { profileStore.loadOrDefault() }
+            ).handle(input)
+        }
+    } catch {
         exit(1)
     }
 case "companion":
@@ -70,6 +83,8 @@ case "companion":
         signalOffAcknowledgement: SignalOffAcknowledgementStore(
             url: KeyphoreRuntimePaths.signalOffAcknowledgementURL()
         ),
+        quitGate: QuitGateStore(url: KeyphoreRuntimePaths.quitGateURL()),
+        ownershipStore: LightingOwnershipStore(url: KeyphoreRuntimePaths.supportDirectory().appending(path: "lighting-ownership.json")),
         interruptionReconciler: CodexInterruptionReconciler()
     )
     let recovery = CompanionRecoveryController(companion: companion)

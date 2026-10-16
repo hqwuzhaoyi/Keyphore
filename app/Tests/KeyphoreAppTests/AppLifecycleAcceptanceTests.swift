@@ -5,6 +5,76 @@ import KeyphoreCore
 
 @MainActor
 final class AppLifecycleAcceptanceTests: XCTestCase {
+    func testSelectingSignalPreviewRequestsOnlyThatSignalAndCanRestart() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SignalPreviewStore(url: directory.appending(path: "preview.json"))
+        let state = KeyphoreAppState(
+            lifecycle: KeyphoreLifecycle(
+                health: AppHealth(keyboard: .connected(protocolHealthy: true)), profiles: AppProfile(),
+                durableStatus: AppDurableStatus(), lighting: AppLighting(), runtime: AppRecordingRuntime()
+            ),
+            previewStore: store
+        )
+        var requestIDs = Set<String>()
+        for preset: LightingPreset in [.attention, .completion, .idle, .execution, .execution] {
+            state.beginSignalPreview(for: preset)
+            let record = try XCTUnwrap(store.load())
+            XCTAssertEqual(record.requestedPreset, preset)
+            XCTAssertEqual(record.phase, .pending)
+            XCTAssertEqual(state.previewRecord, record)
+            XCTAssertTrue(requestIDs.insert(record.id).inserted)
+            XCTAssertEqual(state.snapshot.currentSignal, .signalOff)
+            XCTAssertEqual(state.snapshot.profile, .default)
+        }
+        state.beginSignalPreview()
+        XCTAssertNil(try store.load()?.requestedPreset, "Device check still requests the full diagnostic sequence")
+    }
+
+    func testDisconnectedKeyboardDoesNotQueueSelectedSignalPreview() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SignalPreviewStore(url: directory.appending(path: "preview.json"))
+        let state = KeyphoreAppState(
+            lifecycle: KeyphoreLifecycle(
+                health: AppHealth(), profiles: AppProfile(), durableStatus: AppDurableStatus(),
+                lighting: AppLighting(), runtime: AppRecordingRuntime()
+            ),
+            previewStore: store
+        )
+        state.beginSignalPreview(for: .attention)
+        XCTAssertNil(try store.load())
+    }
+
+    func testFailedIdleProfileWriteDoesNotPreviewStaleSettingsOrHideTheFailure() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let preview = SignalPreviewStore(url: directory.appending(path: "preview.json"))
+        let state = KeyphoreAppState(
+            lifecycle: KeyphoreLifecycle(
+                health: AppHealth(keyboard: .connected(protocolHealthy: true)), profiles: AppProfile(),
+                durableStatus: AppDurableStatus(), lighting: AppLighting(), runtime: AppRecordingRuntime()
+            ),
+            profileStore: LocalProfileStore(url: directory),
+            previewStore: preview
+        )
+        let idle = SignalAppearance(
+            isVisible: true, backlight: LocalProfile.defaultIdle.backlight,
+            strip: LocalProfile.defaultIdle.strip
+        )
+
+        state.updateAppearance(idle, for: LightingPreset.idle)
+
+        XCTAssertTrue(state.settingsFailed)
+        XCTAssertNil(try preview.load())
+        XCTAssertEqual(state.snapshot.profile, .default)
+
+        XCTAssertFalse(state.updateControlledZones(.both))
+        XCTAssertTrue(state.settingsFailed)
+        XCTAssertNil(try preview.load())
+    }
+
     func testStatusPollingDoesNotRepeatInstallationInspectionWithinOneMinute() async {
         let integration = AppSetupIntegration(configured: true)
         let setup = GuidedSetup(hosts: AppHostDetector(), integration: integration,
@@ -171,19 +241,35 @@ final class AppLifecycleAcceptanceTests: XCTestCase {
             profileStore: store
         )
         let custom = SignalAppearance(
-            isVisible: false, color: SignalColor(red: 120, green: 30, blue: 90),
-            brightness: SignalBrightness(percent: 42)!, pattern: .slowFlashing
+            isVisible: false,
+            backlight: ZoneAppearance(
+                effect: .backlightWave, color: SignalColor(red: 120, green: 30, blue: 90),
+                colorMode: .multicolor, brightness: SignalBrightness(percent: 42)!,
+                speed: LightingSpeed(level: 4)!, direction: .reverse
+            ),
+            strip: LocalProfile.default.completion.strip
         )
-        state.updateAppearance(custom, for: .completion)
+        let customIdle = SignalAppearance(
+            isVisible: true, backlight: LocalProfile.defaultIdle.backlight,
+            strip: LocalProfile.defaultIdle.strip
+        )
+        state.updateControlledZones(.both)
+        state.updateAppearance(customIdle, for: LightingPreset.idle)
+        state.updateAppearance(custom, for: CodexSignal.completion)
         state.updateCompletionDisplayDuration(CompletionDisplayDuration(seconds: 12)!)
-        state.resetSignalColor(for: .completion)
+        state.resetSignalColor(for: .completion, zone: .backlight)
 
         let reopened = try LocalProfileStore(url: store.url).load()
-        XCTAssertEqual(reopened.completion.color, LocalProfile.default.completion.color)
-        XCTAssertEqual(reopened.completion.brightness.percent, 42)
-        XCTAssertEqual(reopened.completion.pattern, .slowFlashing)
+        XCTAssertEqual(reopened.completion.backlight.color, LocalProfile.default.completion.backlight.color)
+        XCTAssertEqual(reopened.completion.backlight.brightness.percent, 42)
+        XCTAssertEqual(reopened.completion.backlight.effect, .backlightWave)
+        XCTAssertEqual(reopened.completion.backlight.colorMode, .custom)
+        XCTAssertEqual(reopened.completion.backlight.speed.level, 4)
+        XCTAssertEqual(reopened.completion.backlight.direction, .reverse)
         XCTAssertFalse(reopened.completion.isVisible)
         XCTAssertEqual(reopened.completionDisplayDuration.seconds, 12)
+        XCTAssertEqual(reopened.controlledZones, .both)
+        XCTAssertEqual(reopened.idle, customIdle)
         XCTAssertEqual(reopened.execution, LocalProfile.default.execution)
         XCTAssertEqual(reopened.attention, LocalProfile.default.attention)
         XCTAssertEqual(state.snapshot.profile, reopened)
@@ -242,7 +328,7 @@ final class AppLifecycleAcceptanceTests: XCTestCase {
         let gate = QuitGateStore(url: directory.appending(path: "quit-gate"))
         let runtime = AppRecordingRuntime(gate: gate)
         let state = makeState(runtime: runtime)
-        let delegate = KeyphoreAppDelegate()
+        let delegate = KeyphoreAppDelegate(state: state)
         delegate.prepareToQuit = state.prepareToQuit
 
         XCTAssertEqual(delegate.applicationShouldTerminateAfterLastWindowClosed(.shared), false)
@@ -419,7 +505,8 @@ private final class AppRecordingRuntime: KeyphoreRuntimeManaging {
 }
 
 private struct AppHealth: KeyphoreHealthProviding {
-    func currentHealth() -> KeyphoreHealth { .configured(keyboard: .disconnected) }
+    var keyboard: KeyboardHealth = .disconnected
+    func currentHealth() -> KeyphoreHealth { .configured(keyboard: keyboard) }
 }
 
 private struct AppProfile: LocalProfileProviding {

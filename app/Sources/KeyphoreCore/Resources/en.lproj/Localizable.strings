@@ -13,7 +13,7 @@
 "signal.short.execution" = "Working";
 "signal.short.attention" = "Attention";
 "signal.short.completion" = "Complete";
-"signal.off_description" = "Main backlight is off, waiting for the next signal.";
+"signal.off_description" = "Controlled lights are off, waiting for the next task.";
 "signal.hidden" = "This signal is hidden";
 "keyboard.illustration" = "Air65 V3 keyboard illustration";
 "preview.running_short" = "Previewing…";
@@ -75,6 +75,54 @@
 "settings.pattern" = "Pattern";
 "settings.pattern.steady" = "Steady";
 "settings.pattern.slow_flashing" = "Slow flashing";
+"settings.pattern.breathing" = "Breathing";
+"settings.pattern.pulse" = "Pulse";
+"settings.pattern.color_cycle" = "Color cycle";
+"settings.pattern.color_cycle_help" = "Cycles through hues, starting from your chosen color.";
+"settings.lighting_preview" = "Lighting preview";
+"settings.recent_colors" = "Recent colors";
+"settings.controlled_zones" = "Keyphore controls";
+"settings.zones" = "Lighting zones";
+"settings.zone.backlight" = "Backlight";
+"settings.zone.strip" = "Strip light";
+"settings.manage.backlight" = "Backlight";
+"settings.manage.strip" = "Strip";
+"settings.manage.both" = "Both";
+"settings.managed" = "Controlled by Keyphore";
+"settings.unmanaged" = "Left unchanged";
+"settings.zone_unmanaged_detail" = "Select this zone above to let Keyphore control it.";
+"settings.native_effect" = "Native effect";
+"settings.parameters" = "Parameters";
+"settings.speed" = "Speed";
+"settings.direction" = "Direction";
+"settings.direction.left" = "Left";
+"settings.direction.right" = "Right";
+"settings.direction.up" = "Up";
+"settings.direction.down" = "Down";
+"settings.custom_color" = "Custom color";
+"settings.preview_approximate" = "Color and zone preview. Native motion appears on the keyboard; reactive effects such as Ripple and Point respond to key presses.";
+"effect.spectrum" = "Ray";
+"effect.gradient" = "Stair";
+"effect.static" = "Static";
+"effect.breathing" = "Breath";
+"effect.flowers" = "Flower";
+"effect.wave" = "Wave";
+"effect.up_down_wave" = "Ripple";
+"effect.fountain" = "Spout";
+"effect.galaxy" = "Galaxy";
+"effect.rotation" = "Rotation";
+"effect.ripple" = "Ripple";
+"effect.single_point" = "Point";
+"effect.grid" = "Grid";
+"effect.flowing" = "Time";
+"effect.rain" = "Rain";
+"effect.wave_band" = "Ribbon";
+"effect.gaming" = "Gaming";
+"effect.identify" = "Identify";
+"effect.windmill" = "Windmill";
+"effect.diagonal" = "Diagonal";
+"effect.rhythm" = "Rhythm";
+"effect.neon" = "Neon";
 "settings.completion_duration" = "Completion signal duration";
 "settings.seconds" = "seconds";
 "settings.save_error" = "The settings could not be saved. Try again.";
@@ -135,7 +183,7 @@
 "diagnostic.save" = "Save Diagnostic ZIP…";
 "diagnostic.save_failed" = "The diagnostic ZIP could not be saved. Try another location.";
 "removal.title" = "Remove Keyphore";
-"removal.description" = "Keyphore will turn off the signal surface, disable its eight Hooks, and remove only the managed components listed below. Other Codex Plugins, Hooks, installations, and files remain unchanged.";
+"removal.description" = "Keyphore will turn off the signal surface, disable its Agent integrations, and remove only the managed components listed below. Other Agent plugins, hooks, installations, and files remain unchanged.";
 "removal.action" = "Remove Keyphore-managed components…";
 "removal.confirm" = "Confirm Removal";
 "removal.repair_title" = "Finish Removing Keyphore";
@@ -178,8 +226,8 @@
 "status.attention" = "Needs Your Attention";
 "status.completed" = "Task Completed";
 "status.no_signal" = "No Active Task Signal";
-"status.execution_detail" = "Codex is working. No action needed.";
-"status.attention_detail" = "Return to Codex to review pending requests.";
+"status.execution_detail" = "Your coding agent is working. No action needed.";
+"status.attention_detail" = "Return to your coding agent to review pending requests.";
 "status.completion_detail" = "The current task signal resumes after this indication.";
 "status.usb_connected" = "USB Connected";
 "status.waiting_for_usb" = "Waiting for USB";
@@ -217,7 +265,7 @@
 "settings.tab.lights" = "Lights";
 "settings.tab.device" = "Device";
 "settings.tab.about" = "About";
-"about.description" = "Codex task status on your keyboard.";
+"about.description" = "Coding agent task status on your keyboard.";
 "about.version" = "Version %@ (%@)";
 "about.website" = "Project website";
 "about.more_apps" = "More of my work";
@@ -232,6 +280,44 @@
 "about.follow_developer" = "Follow the developer";
 
 "diagnostic.preview.pending" = "Waiting to start";
-"diagnostic.preview.rhythm" = "Rhythm lights unchanged";
+"diagnostic.preview.rhythm" = "Unmanaged lighting zones unchanged";
 "diagnostic.preview.visual" = "Visual confirmation";
 "diagnostic.preview.unconfirmed" = "Not yet confirmed";
+"settings.tab.integrations" = "Agents";
+"integrations.title" = "Agent integrations";
+"integrations.detail" = "Connect an installed coding agent to Keyphore.";
+"integrations.available" = "Available";
+"integrations.unavailable" = "Not installed";
+"integrations.enabled" = "Enabled";
+"integrations.needs_review" = "Review required";
+"integrations.not_enabled" = "Not enabled";
+"integrations.review" = "Review";
+"integrations.review_title" = "Review before enabling";
+"integrations.events" = "Events";
+"integrations.files" = "Files Keyphore will install";
+"integrations.privacy" = "Keyphore keeps only lifecycle identifiers and event timing. Prompts, responses, transcripts, and tool content are never persisted or uploaded.";
+"integrations.enable" = "Enable integration";
+"integrations.remove" = "Remove";
+"integrations.remove_title" = "Remove integration?";
+"integrations.remove_message" = "Keyphore will remove only its files and registration for this agent.";
+"integrations.cancel" = "Cancel";
+"integrations.working" = "Working…";
+"integrations.error" = "This integration could not be changed. Other agents were not affected.";
+"integrations.codex_managed" = "Managed by Codex guided setup";
+"integrations.pi_signals" = "Pi reports execution, completion, and cancellation. It has no standardized attention event.";
+
+"settings.color_presets" = "Color presets";
+
+"settings.automatic_colors" = "This effect uses built-in colors. No color selection is needed.";
+
+"settings.idle" = "Idle";
+
+"settings.idle_behavior" = "When idle";
+
+"settings.idle_off" = "Turn lights off";
+
+"settings.idle_custom" = "Use idle lighting";
+
+"settings.idle_detail" = "Used when no task is active and the completion signal has ended. Quitting Keyphore still turns off the controlled lights.";
+
+"status.idle_detail" = "No active tasks. Showing your idle lighting.";

@@ -105,6 +105,22 @@ public final class SignalOffAcknowledgementStore: @unchecked Sendable {
     }
 }
 
+public final class LightingOwnershipStore {
+    public let url: URL
+
+    public init(url: URL) { self.url = url }
+
+    public func load() throws -> Set<LightingZone> {
+        do { return try JSONDecoder().decode(Set<LightingZone>.self, from: Data(contentsOf: url)) }
+        catch CocoaError.fileReadNoSuchFile { return [] }
+    }
+
+    public func save(_ zones: Set<LightingZone>) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(zones).write(to: url, options: .atomic)
+    }
+}
+
 public struct StatusTimestamp: Codable, Comparable, Equatable, Sendable {
     public let millisecondsSince1970: UInt64
 
@@ -210,17 +226,20 @@ public struct CurrentOwnerTurn: Codable, Equatable, Sendable {
     public var currentTurnID: String
     public var previousTurnIDs: [String]
     public var isTerminal: Bool
+    public var pendingRequestIDs: [String]
 
     public init(
         id: SignalOwnerID,
         currentTurnID: String,
         previousTurnIDs: [String] = [],
-        isTerminal: Bool = false
+        isTerminal: Bool = false,
+        pendingRequestIDs: [String] = []
     ) {
         self.id = id
         self.currentTurnID = currentTurnID
         self.previousTurnIDs = previousTurnIDs
         self.isTerminal = isTerminal
+        self.pendingRequestIDs = pendingRequestIDs
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -228,6 +247,7 @@ public struct CurrentOwnerTurn: Codable, Equatable, Sendable {
         case currentTurnID = "current_turn_id"
         case previousTurnIDs = "previous_turn_ids"
         case isTerminal = "is_terminal"
+        case pendingRequestIDs = "pending_request_ids"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -236,6 +256,7 @@ public struct CurrentOwnerTurn: Codable, Equatable, Sendable {
         currentTurnID = try container.decode(String.self, forKey: .currentTurnID)
         previousTurnIDs = try container.decode([String].self, forKey: .previousTurnIDs)
         isTerminal = try container.decodeIfPresent(Bool.self, forKey: .isTerminal) ?? false
+        pendingRequestIDs = try container.decodeIfPresent([String].self, forKey: .pendingRequestIDs) ?? []
     }
 }
 
@@ -372,6 +393,93 @@ public final class DurableStatusStore: @unchecked Sendable {
             {
                 status.currentOwnerTurns[index].isTerminal = true
             }
+        }
+    }
+
+    public func removeProduct(_ source: AgentSource, lockBudget: Duration) throws {
+        try update(lockBudget: lockBudget) { status in
+            status.owners.removeAll { $0.id.product == source.rawValue }
+            for index in status.currentOwnerTurns.indices
+            where status.currentOwnerTurns[index].id.product == source.rawValue {
+                status.currentOwnerTurns[index].isTerminal = true
+                status.currentOwnerTurns[index].pendingRequestIDs = []
+            }
+        }
+    }
+
+    /// Resolves missing native turn IDs and applies the event in the same cross-process lock.
+    public func apply(
+        _ event: AgentSignalEvent, at now: StatusTimestamp,
+        completionLifetime: Duration, lockBudget: Duration,
+        isAuthorized: () -> Bool = { true }
+    ) throws {
+        try update(lockBudget: lockBudget) { status in
+            guard isAuthorized() else { return }
+            let ownerID = SignalOwnerID(product: event.source.rawValue,
+                                        sessionID: event.sessionID, agentID: event.agentID)
+            if event.kind == .sessionStart || event.kind == .sessionEnd {
+                let belongs: (SignalOwnerID) -> Bool = {
+                    $0.product == ownerID.product && $0.sessionID == ownerID.sessionID
+                        && (ownerID.agentID == "main" || $0.agentID == ownerID.agentID)
+                }
+                status.owners.removeAll { belongs($0.id) }
+                for index in status.currentOwnerTurns.indices where belongs(status.currentOwnerTurns[index].id) {
+                    status.currentOwnerTurns[index].isTerminal = true
+                    status.currentOwnerTurns[index].pendingRequestIDs = []
+                }
+                return
+            }
+            let startsTurn = event.kind == .turnStart || event.kind == .agentStart
+            let existing = status.currentOwnerTurns.first { $0.id == ownerID }
+            let turnID: String
+            if startsTurn {
+                turnID = event.turnID ?? "local-" + UUID().uuidString
+                guard status.accepts(turnID: turnID, for: ownerID, advancing: true) else { return }
+            } else {
+                // Tool/stop events cannot invent an active turn or revive a finished one.
+                guard let existing, event.turnID == nil || event.turnID == existing.currentTurnID else { return }
+                turnID = existing.currentTurnID
+                if existing.isTerminal {
+                    // Grok may cancel after Stop has already fired, so retract that completion.
+                    guard event.kind == .turnCancelled else { return }
+                }
+            }
+            guard let index = status.currentOwnerTurns.firstIndex(where: { $0.id == ownerID }) else { return }
+            if startsTurn && existing?.currentTurnID != turnID {
+                status.currentOwnerTurns[index].pendingRequestIDs = []
+            }
+            switch event.kind {
+            case .turnCancelled, .agentEnd:
+                status.owners.removeAll { $0.id == ownerID }
+                status.currentOwnerTurns[index].isTerminal = true
+                status.currentOwnerTurns[index].pendingRequestIDs = []
+                return
+            case .attention:
+                let requestID = event.requestID ?? "unkeyed"
+                if !status.currentOwnerTurns[index].pendingRequestIDs.contains(requestID) {
+                    status.currentOwnerTurns[index].pendingRequestIDs.append(requestID)
+                }
+            case .attentionResolved:
+                // Without an ID, correlate only the host's single unkeyed prompt. A named
+                // reply must not also clear an independent unkeyed prompt when both exist.
+                let resolveUnkeyed = event.requestID == nil
+                    || status.currentOwnerTurns[index].pendingRequestIDs == ["unkeyed"]
+                status.currentOwnerTurns[index].pendingRequestIDs.removeAll {
+                    $0 == event.requestID || (resolveUnkeyed && $0 == "unkeyed")
+                }
+            case .turnComplete:
+                status.currentOwnerTurns[index].isTerminal = true
+                status.currentOwnerTurns[index].pendingRequestIDs = []
+            default: break
+            }
+            let signal: CodexSignal = event.kind == .turnComplete ? .completion
+                : (status.currentOwnerTurns[index].pendingRequestIDs.isEmpty ? .execution : .attention)
+            status.generation = status.generation == UInt64.max ? UInt64.max : status.generation + 1
+            status.owners.removeAll { $0.id == ownerID }
+            status.owners.append(SignalOwner(
+                id: ownerID, turnID: turnID, signal: signal, generation: status.generation,
+                expiresAt: now.adding(signal == .completion ? completionLifetime : ProductionHookHandler.executionLifetime)
+            ))
         }
     }
 
@@ -685,7 +793,12 @@ public final class KeyphoreCompanion {
     private let lockBudget: Duration
     private let previewController: SignalPreviewController?
     private let signalOffAcknowledgement: SignalOffAcknowledgementStore?
+    private let quitGate: QuitGateStore?
     private var applied: LightingBehavior?
+    private let ownershipStore: LightingOwnershipStore?
+    private var ownedZones: Set<LightingZone>?
+    private var lastHealth: KeyboardHealth?
+    private var lastHealthSavedAt: StatusTimestamp?
 
     public convenience init(
         store: DurableStatusStore,
@@ -695,6 +808,8 @@ public final class KeyphoreCompanion {
         lockBudget: Duration = .milliseconds(100),
         previewStore: SignalPreviewStore? = nil,
         signalOffAcknowledgement: SignalOffAcknowledgementStore? = nil,
+        quitGate: QuitGateStore? = nil,
+        ownershipStore: LightingOwnershipStore? = nil,
         interruptionReconciler: CodexInterruptionReconciler? = nil
     ) {
         self.init(
@@ -705,6 +820,8 @@ public final class KeyphoreCompanion {
             lockBudget: lockBudget,
             previewStore: previewStore,
             signalOffAcknowledgement: signalOffAcknowledgement,
+            quitGate: quitGate,
+            ownershipStore: ownershipStore,
             interruptionReconciler: interruptionReconciler
         )
     }
@@ -717,6 +834,8 @@ public final class KeyphoreCompanion {
         lockBudget: Duration = .milliseconds(100),
         previewStore: SignalPreviewStore? = nil,
         signalOffAcknowledgement: SignalOffAcknowledgementStore? = nil,
+        quitGate: QuitGateStore? = nil,
+        ownershipStore: LightingOwnershipStore? = nil,
         interruptionReconciler: CodexInterruptionReconciler? = nil
     ) {
         self.store = store
@@ -726,6 +845,8 @@ public final class KeyphoreCompanion {
         self.keyboardHealthStore = keyboardHealthStore
         self.lockBudget = lockBudget
         self.signalOffAcknowledgement = signalOffAcknowledgement
+        self.quitGate = quitGate
+        self.ownershipStore = ownershipStore
         if let previewStore, let evidenceLighting = lighting as? any CompanionLightingEvidenceApplying {
             previewController = SignalPreviewController(
                 store: previewStore,
@@ -738,11 +859,44 @@ public final class KeyphoreCompanion {
     }
 
     public func sync(at now: StatusTimestamp = .now) throws {
+        if ownedZones == nil { ownedZones = try ownershipStore?.load() ?? [] }
+        if quitGate?.isActive == true {
+            // Ownership survives status resets; quit never needs the signal profile.
+            try? previewController?.cancel()
+            if !ownedZones!.isEmpty {
+                // Another lighting tool may have changed a zone since our cached idle-off frame.
+                applied = nil
+                try apply(.off(zones: ownedZones!), at: now)
+                try ownershipStore?.save([])
+                ownedZones = []
+            }
+            try acknowledgeOff()
+            return
+        }
+        let profile = try profileProvider()
+        let desiredZones = Set(LightingZone.allCases.filter { profile.controlledZones.contains($0) })
+        try prepareOwnership(desiredZones, at: now)
         try interruptionReconciler?.reconcile(store: store, at: now)
         if let previewController {
-            switch try previewController.poll(at: now) {
+            let result: SignalPreviewPollResult
+            do {
+                result = try previewController.poll(at: now, profile: profile)
+            } catch {
+                // Preview may have changed the device before its checkpoint failed.
+                applied = nil
+                try? signalOffAcknowledgement?.clear()
+                throw error
+            }
+            switch result {
+            case .superseded:
+                applied = nil
+                try signalOffAcknowledgement?.clear()
+                return
             case .active:
                 applied = nil
+                try signalOffAcknowledgement?.clear()
+                try settleOwnership(desiredZones)
+                try saveHealth(.connected(protocolHealthy: true, model: (lighting as? any CompanionKeyboardIdentifying)?.connectedModel), at: now)
                 return
             case .finished:
                 applied = nil
@@ -754,50 +908,85 @@ public final class KeyphoreCompanion {
             try store.expire(expiry, at: now, lockBudget: lockBudget)
         }
         let outcome = try store.outcome(at: now)
-        let profile = try profileProvider()
-        let behavior = profile.behavior(for: profile.aggregateSignal(for: outcome), at: now)
-        guard behavior != applied else {
-            if behavior == .off, signalOffAcknowledgement?.isAcknowledged == false {
-                try signalOffAcknowledgement?.acknowledge()
-            }
-            return
+        let signal = profile.aggregateSignal(for: outcome)
+        let behavior = profile.behavior(for: signal)
+        try apply(behavior, at: now)
+        try settleOwnership(desiredZones)
+        if behavior.isOff { try acknowledgeOff() }
+    }
+
+    private func prepareOwnership(_ desired: Set<LightingZone>, at now: StatusTimestamp) throws {
+        let previous = ownedZones ?? []
+        guard previous != desired else { return }
+        let combined = previous.union(desired)
+        try ownershipStore?.save(combined)
+        ownedZones = combined
+        applied = nil
+        let released = previous.subtracting(desired)
+        guard !released.isEmpty else { return }
+        do { try lighting.apply(.off(zones: released)) }
+        catch {
+            try saveHealth(Self.health(for: error), at: now)
+            throw error
         }
-        if behavior != .off {
+    }
+
+    private func settleOwnership(_ desired: Set<LightingZone>) throws {
+        guard ownedZones != desired else { return }
+        try ownershipStore?.save(desired)
+        ownedZones = desired
+    }
+
+    private func apply(_ behavior: LightingBehavior, at now: StatusTimestamp) throws {
+        guard behavior != applied else { return }
+        if !behavior.isOff {
             try signalOffAcknowledgement?.clear()
         }
         do {
             try lighting.apply(behavior)
             applied = behavior
-            if behavior == .off {
-                try signalOffAcknowledgement?.acknowledge()
-            }
-            try keyboardHealthStore?.save(.connected(protocolHealthy: true, model: (lighting as? any CompanionKeyboardIdentifying)?.connectedModel), at: now)
+            try saveHealth(.connected(protocolHealthy: true, model: (lighting as? any CompanionKeyboardIdentifying)?.connectedModel), at: now)
         } catch {
             applied = nil
-            try keyboardHealthStore?.save(Self.health(for: error), at: now)
+            try saveHealth(Self.health(for: error), at: now)
             throw error
         }
     }
 
     public func healthCheck(at now: StatusTimestamp = .now) throws {
+        if quitGate?.isActive == true {
+            try sync(at: now)
+            return
+        }
         if try previewController?.hasActivePreview() == true { return }
         guard let lighting = lighting as? any CompanionLightingVerifying else { return }
         let outcome = try store.outcome(at: now)
         let profile = try profileProvider()
-        let behavior = profile.behavior(for: profile.aggregateSignal(for: outcome), at: now)
+        let signal = profile.aggregateSignal(for: outcome)
+        let desiredZones = Set(LightingZone.allCases.filter { profile.controlledZones.contains($0) })
+        guard let behavior = applied, behavior == profile.behavior(for: signal), ownedZones == desiredZones else {
+            try sync(at: now)
+            return
+        }
         do {
             if try lighting.displays(behavior) {
                 applied = behavior
-                try keyboardHealthStore?.save(.connected(protocolHealthy: true, model: (lighting as? any CompanionKeyboardIdentifying)?.connectedModel), at: now)
+                if behavior.isOff, signalOffAcknowledgement?.isAcknowledged == false {
+                    try signalOffAcknowledgement?.acknowledge()
+                }
+                try saveHealth(.connected(protocolHealthy: true, model: (lighting as? any CompanionKeyboardIdentifying)?.connectedModel), at: now)
                 return
             }
             applied = nil
             try self.lighting.apply(behavior)
             applied = behavior
-            try keyboardHealthStore?.save(.connected(protocolHealthy: true, model: (lighting as? any CompanionKeyboardIdentifying)?.connectedModel), at: now)
+            if behavior.isOff, signalOffAcknowledgement?.isAcknowledged == false {
+                try signalOffAcknowledgement?.acknowledge()
+            }
+            try saveHealth(.connected(protocolHealthy: true, model: (lighting as? any CompanionKeyboardIdentifying)?.connectedModel), at: now)
         } catch {
             applied = nil
-            try keyboardHealthStore?.save(Self.health(for: error), at: now)
+            try saveHealth(Self.health(for: error), at: now)
             throw error
         }
     }
@@ -810,7 +999,19 @@ public final class KeyphoreCompanion {
     public func transportInterrupted(at now: StatusTimestamp = .now) throws {
         applied = nil
         (lighting as? any CompanionLightingRecovering)?.invalidateTransport()
-        try keyboardHealthStore?.save(.disconnected, at: now)
+        try saveHealth(.disconnected, at: now)
+    }
+
+    private func acknowledgeOff() throws {
+        if signalOffAcknowledgement?.isAcknowledged == false { try signalOffAcknowledgement?.acknowledge() }
+    }
+
+    private func saveHealth(_ health: KeyboardHealth, at now: StatusTimestamp) throws {
+        if health == lastHealth, let saved = lastHealthSavedAt, now >= saved,
+           now.millisecondsSince1970 - saved.millisecondsSince1970 < 1_000 { return }
+        try keyboardHealthStore?.save(health, at: now)
+        lastHealth = health
+        lastHealthSavedAt = now
     }
 
     private static func health(for error: Error) -> KeyboardHealth {

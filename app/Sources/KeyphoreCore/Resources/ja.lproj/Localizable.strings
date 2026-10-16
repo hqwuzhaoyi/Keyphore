@@ -13,7 +13,7 @@
 "signal.short.execution" = "実行中";
 "signal.short.attention" = "要対応";
 "signal.short.completion" = "完了";
-"signal.off_description" = "メインバックライトは消灯中です。次のシグナルを待っています。";
+"signal.off_description" = "制御中のライトは消灯しています。次のタスクを待っています。";
 "signal.hidden" = "このシグナルは非表示です";
 "keyboard.illustration" = "Air65 V3 キーボードのイラスト";
 "preview.running_short" = "プレビュー中…";
@@ -75,6 +75,54 @@
 "settings.pattern" = "パターン";
 "settings.pattern.steady" = "常時点灯";
 "settings.pattern.slow_flashing" = "ゆっくり点滅";
+"settings.pattern.breathing" = "ブリージング";
+"settings.pattern.pulse" = "パルス";
+"settings.pattern.color_cycle" = "カラーサイクル";
+"settings.pattern.color_cycle_help" = "選択した色から色相を順に変化させます。";
+"settings.lighting_preview" = "ライトのプレビュー";
+"settings.recent_colors" = "最近の色";
+"settings.controlled_zones" = "Keyphore の制御";
+"settings.zones" = "ライトゾーン";
+"settings.zone.backlight" = "バックライト";
+"settings.zone.strip" = "ライトストリップ";
+"settings.manage.backlight" = "キー";
+"settings.manage.strip" = "ストリップ";
+"settings.manage.both" = "両方";
+"settings.managed" = "Keyphore が制御";
+"settings.unmanaged" = "変更しない";
+"settings.zone_unmanaged_detail" = "上でこのゾーンを選択すると Keyphore が制御します。";
+"settings.native_effect" = "ネイティブ効果";
+"settings.parameters" = "パラメーター";
+"settings.speed" = "速度";
+"settings.direction" = "方向";
+"settings.direction.left" = "左";
+"settings.direction.right" = "右";
+"settings.direction.up" = "上";
+"settings.direction.down" = "下";
+"settings.custom_color" = "カスタムカラー";
+"settings.preview_approximate" = "色とゾーンのプレビューです。ネイティブの動きはキーボードに表示され、Ripple や Point などの反応型エフェクトはキー入力で動作します。";
+"effect.spectrum" = "Ray";
+"effect.gradient" = "Stair";
+"effect.static" = "Static";
+"effect.breathing" = "Breath";
+"effect.flowers" = "Flower";
+"effect.wave" = "Wave";
+"effect.up_down_wave" = "Ripple";
+"effect.fountain" = "Spout";
+"effect.galaxy" = "Galaxy";
+"effect.rotation" = "Rotation";
+"effect.ripple" = "Ripple";
+"effect.single_point" = "Point";
+"effect.grid" = "Grid";
+"effect.flowing" = "Time";
+"effect.rain" = "Rain";
+"effect.wave_band" = "Ribbon";
+"effect.gaming" = "Gaming";
+"effect.identify" = "Identify";
+"effect.windmill" = "Windmill";
+"effect.diagonal" = "Diagonal";
+"effect.rhythm" = "Rhythm";
+"effect.neon" = "Neon";
 "settings.completion_duration" = "完了シグナルの表示時間";
 "settings.seconds" = "秒";
 "settings.save_error" = "設定を保存できませんでした。もう一度お試しください。";
@@ -135,7 +183,7 @@
 "diagnostic.save" = "診断 ZIP を保存…";
 "diagnostic.save_failed" = "診断 ZIP を保存できませんでした。別の保存先をお試しください。";
 "removal.title" = "Keyphore を削除";
-"removal.description" = "シグナル照明を消灯し、8 つの Hooks を無効にして、以下の管理対象コンポーネントだけを削除します。他の Codex Plugin、Hooks、インストール、ファイルは変更しません。";
+"removal.description" = "シグナル照明を消灯し、Keyphore の Agent 連携を無効にして、以下の管理対象コンポーネントだけを削除します。他の Agent プラグイン、Hooks、インストール、ファイルは変更しません。";
 "removal.action" = "Keyphore の管理対象を削除…";
 "removal.confirm" = "削除を確認";
 "removal.repair_title" = "Keyphore の削除を完了";
@@ -178,8 +226,8 @@
 "status.attention" = "対応が必要です";
 "status.completed" = "タスク完了";
 "status.no_signal" = "有効なタスクシグナルなし";
-"status.execution_detail" = "Codex が作業中です。操作は不要です。";
-"status.attention_detail" = "Codex に戻って未対応のリクエストを確認してください。";
+"status.execution_detail" = "コーディング Agent が作業中です。操作は不要です。";
+"status.attention_detail" = "コーディング Agent に戻って未対応のリクエストを確認してください。";
 "status.completion_detail" = "この表示の後、現在のタスクシグナルに戻ります。";
 "status.usb_connected" = "USB 接続済み";
 "status.waiting_for_usb" = "USB 接続待ち";
@@ -213,7 +261,7 @@
 "settings.tab.lights" = "照明";
 "settings.tab.device" = "デバイス";
 "settings.tab.about" = "情報";
-"about.description" = "Codex のタスク状態をキーボードで確認。";
+"about.description" = "コーディング Agent のタスク状態をキーボードで確認。";
 "about.version" = "バージョン %@ (%@)";
 "about.website" = "プロジェクトのサイト";
 "about.more_apps" = "その他の作品";
@@ -225,6 +273,44 @@
 "about.follow_developer" = "開発者をフォロー";
 
 "diagnostic.preview.pending" = "開始待ち";
-"diagnostic.preview.rhythm" = "リズムライトの保持";
+"diagnostic.preview.rhythm" = "管理対象外のライトゾーンは変更なし";
 "diagnostic.preview.visual" = "目視確認";
 "diagnostic.preview.unconfirmed" = "未確認";
+"settings.tab.integrations" = "Agent";
+"integrations.title" = "Agent 連携";
+"integrations.detail" = "インストール済みのコーディング Agent を Keyphore に接続します。";
+"integrations.available" = "利用可能";
+"integrations.unavailable" = "未インストール";
+"integrations.enabled" = "有効";
+"integrations.needs_review" = "再確認が必要";
+"integrations.not_enabled" = "無効";
+"integrations.review" = "確認";
+"integrations.review_title" = "有効化前の確認";
+"integrations.events" = "イベント";
+"integrations.files" = "Keyphore がインストールするファイル";
+"integrations.privacy" = "Keyphore が保持するのはライフサイクル識別子とイベント時刻だけです。プロンプト、応答、会話履歴、ツール内容が保存またはアップロードされることはありません。";
+"integrations.enable" = "連携を有効化";
+"integrations.remove" = "削除";
+"integrations.remove_title" = "連携を削除しますか？";
+"integrations.remove_message" = "Keyphore はこの Agent 用の自身のファイルと登録だけを削除します。";
+"integrations.cancel" = "キャンセル";
+"integrations.working" = "処理中…";
+"integrations.error" = "この連携を変更できませんでした。他の Agent には影響ありません。";
+"integrations.codex_managed" = "Codex のガイド設定で管理";
+"integrations.pi_signals" = "Pi は実行、完了、キャンセルを通知します。標準化された注意イベントはありません。";
+
+"settings.color_presets" = "プリセットカラー";
+
+"settings.automatic_colors" = "このエフェクトは内蔵の配色を使用するため、色の選択は不要です。";
+
+"settings.idle" = "待機";
+
+"settings.idle_behavior" = "待機時";
+
+"settings.idle_off" = "ライトを消す";
+
+"settings.idle_custom" = "待機時の照明を使用";
+
+"settings.idle_detail" = "実行中のタスクがなく、完了通知が終了した後に使用します。Keyphore を終了すると、制御中のライトは消灯します。";
+
+"status.idle_detail" = "実行中のタスクはありません。待機時の照明を表示しています。";

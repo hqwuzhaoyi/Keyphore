@@ -12,7 +12,7 @@ let package = Package(
     targets: [
         .target(
             name: "KeyphoreCore",
-            resources: [.process("Resources")]
+            resources: [.process("Resources"), .copy("AgentIntegrationResources")]
         ),
         .testTarget(
             name: "KeyphoreCoreTests",

@@ -13,7 +13,7 @@
 "signal.short.execution" = "작업 중";
 "signal.short.attention" = "주의 필요";
 "signal.short.completion" = "완료";
-"signal.off_description" = "메인 백라이트가 꺼져 있으며 다음 신호를 기다리고 있습니다.";
+"signal.off_description" = "제어 중인 조명이 꺼져 있으며 다음 작업을 기다립니다.";
 "signal.hidden" = "이 신호는 숨겨져 있습니다";
 "keyboard.illustration" = "Air65 V3 키보드 그림";
 "preview.running_short" = "미리보기 중…";
@@ -75,6 +75,54 @@
 "settings.pattern" = "패턴";
 "settings.pattern.steady" = "계속 켜짐";
 "settings.pattern.slow_flashing" = "느리게 깜박임";
+"settings.pattern.breathing" = "브리딩";
+"settings.pattern.pulse" = "펄스";
+"settings.pattern.color_cycle" = "색상 순환";
+"settings.pattern.color_cycle_help" = "선택한 색상부터 색조를 순환합니다.";
+"settings.lighting_preview" = "조명 미리보기";
+"settings.recent_colors" = "최근 색상";
+"settings.controlled_zones" = "Keyphore 제어";
+"settings.zones" = "조명 영역";
+"settings.zone.backlight" = "백라이트";
+"settings.zone.strip" = "라이트 스트립";
+"settings.manage.backlight" = "키";
+"settings.manage.strip" = "스트립";
+"settings.manage.both" = "둘 다";
+"settings.managed" = "Keyphore에서 제어";
+"settings.unmanaged" = "변경 안 함";
+"settings.zone_unmanaged_detail" = "Keyphore가 제어하도록 위에서 이 영역을 선택하세요.";
+"settings.native_effect" = "기본 효과";
+"settings.parameters" = "효과 설정";
+"settings.speed" = "속도";
+"settings.direction" = "방향";
+"settings.direction.left" = "왼쪽";
+"settings.direction.right" = "오른쪽";
+"settings.direction.up" = "위";
+"settings.direction.down" = "아래";
+"settings.custom_color" = "사용자 지정 색상";
+"settings.preview_approximate" = "색상과 영역 미리보기입니다. 기본 움직임은 키보드에 표시되며 Ripple, Point 같은 반응형 효과는 키 입력에 반응합니다.";
+"effect.spectrum" = "Ray";
+"effect.gradient" = "Stair";
+"effect.static" = "Static";
+"effect.breathing" = "Breath";
+"effect.flowers" = "Flower";
+"effect.wave" = "Wave";
+"effect.up_down_wave" = "Ripple";
+"effect.fountain" = "Spout";
+"effect.galaxy" = "Galaxy";
+"effect.rotation" = "Rotation";
+"effect.ripple" = "Ripple";
+"effect.single_point" = "Point";
+"effect.grid" = "Grid";
+"effect.flowing" = "Time";
+"effect.rain" = "Rain";
+"effect.wave_band" = "Ribbon";
+"effect.gaming" = "Gaming";
+"effect.identify" = "Identify";
+"effect.windmill" = "Windmill";
+"effect.diagonal" = "Diagonal";
+"effect.rhythm" = "Rhythm";
+"effect.neon" = "Neon";
 "settings.completion_duration" = "완료 신호 표시 시간";
 "settings.seconds" = "초";
 "settings.save_error" = "설정을 저장하지 못했습니다. 다시 시도해 주세요.";
@@ -135,7 +183,7 @@
 "diagnostic.save" = "진단 ZIP 저장…";
 "diagnostic.save_failed" = "진단 ZIP을 저장하지 못했습니다. 다른 위치를 선택해 주세요.";
 "removal.title" = "Keyphore 제거";
-"removal.description" = "Keyphore는 신호 조명을 끄고 Hooks 8개를 비활성화한 뒤 아래 관리 구성 요소만 제거합니다. 다른 Codex Plugin, Hooks, 설치 및 파일은 변경되지 않습니다.";
+"removal.description" = "Keyphore는 신호 조명을 끄고 자체 Agent 연동을 비활성화한 뒤 아래 관리 구성 요소만 제거합니다. 다른 Agent 플러그인, Hooks, 설치 및 파일은 변경되지 않습니다.";
 "removal.action" = "Keyphore 관리 구성 요소 제거…";
 "removal.confirm" = "제거 확인";
 "removal.repair_title" = "Keyphore 제거 완료하기";
@@ -178,8 +226,8 @@
 "status.attention" = "확인이 필요합니다";
 "status.completed" = "작업 완료";
 "status.no_signal" = "활성 작업 신호 없음";
-"status.execution_detail" = "Codex가 작업 중입니다. 조치가 필요하지 않습니다.";
-"status.attention_detail" = "Codex로 돌아가 대기 중인 요청을 검토해 주세요.";
+"status.execution_detail" = "코딩 Agent가 작업 중입니다. 조치가 필요하지 않습니다.";
+"status.attention_detail" = "코딩 Agent로 돌아가 대기 중인 요청을 검토해 주세요.";
 "status.completion_detail" = "이 표시가 끝나면 현재 작업 신호로 돌아갑니다.";
 "status.usb_connected" = "USB 연결됨";
 "status.waiting_for_usb" = "USB 연결 대기 중";
@@ -213,7 +261,7 @@
 "settings.tab.lights" = "조명";
 "settings.tab.device" = "장치";
 "settings.tab.about" = "정보";
-"about.description" = "키보드에서 확인하는 Codex 작업 상태.";
+"about.description" = "키보드에서 확인하는 코딩 Agent 작업 상태.";
 "about.version" = "버전 %@ (%@)";
 "about.website" = "프로젝트 웹사이트";
 "about.more_apps" = "다른 작품";
@@ -225,6 +273,44 @@
 "about.follow_developer" = "개발자 팔로우";
 
 "diagnostic.preview.pending" = "시작 대기 중";
-"diagnostic.preview.rhythm" = "리듬 조명 유지";
+"diagnostic.preview.rhythm" = "관리되지 않는 조명 영역 변경 없음";
 "diagnostic.preview.visual" = "시각적 확인";
 "diagnostic.preview.unconfirmed" = "아직 확인되지 않음";
+"settings.tab.integrations" = "Agent";
+"integrations.title" = "Agent 연동";
+"integrations.detail" = "설치된 코딩 Agent를 Keyphore에 연결합니다.";
+"integrations.available" = "사용 가능";
+"integrations.unavailable" = "설치되지 않음";
+"integrations.enabled" = "활성화됨";
+"integrations.needs_review" = "검토 필요";
+"integrations.not_enabled" = "비활성화됨";
+"integrations.review" = "검토";
+"integrations.review_title" = "활성화 전 검토";
+"integrations.events" = "이벤트";
+"integrations.files" = "Keyphore가 설치할 파일";
+"integrations.privacy" = "Keyphore는 수명 주기 식별자와 이벤트 시간만 보관합니다. 프롬프트, 응답, 대화 기록 및 도구 내용은 저장되거나 업로드되지 않습니다.";
+"integrations.enable" = "연동 활성화";
+"integrations.remove" = "제거";
+"integrations.remove_title" = "연동을 제거할까요?";
+"integrations.remove_message" = "Keyphore는 이 Agent용 자체 파일과 등록만 제거합니다.";
+"integrations.cancel" = "취소";
+"integrations.working" = "처리 중…";
+"integrations.error" = "이 연동을 변경할 수 없습니다. 다른 Agent에는 영향이 없습니다.";
+"integrations.codex_managed" = "Codex 안내 설정에서 관리";
+"integrations.pi_signals" = "Pi는 실행, 완료, 취소를 보고합니다. 표준화된 주의 이벤트는 없습니다.";
+
+"settings.color_presets" = "기본 색상";
+
+"settings.automatic_colors" = "이 효과는 내장 색상을 사용하므로 색상을 선택할 필요가 없습니다.";
+
+"settings.idle" = "대기";
+
+"settings.idle_behavior" = "대기 중";
+
+"settings.idle_off" = "조명 끄기";
+
+"settings.idle_custom" = "대기 조명 사용";
+
+"settings.idle_detail" = "진행 중인 작업이 없고 완료 표시가 끝나면 적용됩니다. Keyphore를 종료하면 제어 중인 조명은 꺼집니다.";
+
+"status.idle_detail" = "진행 중인 작업이 없습니다. 대기 조명을 표시합니다.";

@@ -141,8 +141,9 @@ final class KeyphoreAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
             let controller = NSHostingController(rootView: SignalSettingsView(
                 state: state, checkForUpdates: checkForUpdates))
             let window = NSWindow(contentViewController: controller)
-            window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 480, height: 640))
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.minSize = NSSize(width: 1000, height: 700)
+            window.setContentSize(NSSize(width: 1040, height: 760))
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindow = window
