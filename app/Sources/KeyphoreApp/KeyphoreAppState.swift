@@ -19,6 +19,10 @@ final class KeyphoreAppState: ObservableObject {
     @Published private(set) var validationFailed = false
     @Published private(set) var previewStateFailed = false
     @Published private(set) var experimentalRecords: [ExperimentalKeyboardRecord] = []
+    @Published private(set) var desiredKeyboardModel: SupportedKeyboardModel?
+    @Published private(set) var keyboardSelectionSnapshot: KeyboardSelectionSnapshot?
+    @Published private(set) var keyboardSelectionFailed = false
+    @Published private(set) var profileModel: SupportedKeyboardModel?
     @Published private(set) var previewRecord: SignalPreviewRecord?
     @Published private(set) var quitFailed = false
     @Published private(set) var diagnosticReport: DiagnosticReport
@@ -39,8 +43,10 @@ final class KeyphoreAppState: ObservableObject {
     private let lifecycle: KeyphoreLifecycle
     private let guidedSetup: GuidedSetup?
     private let systemHealth: SystemKeyphoreHealthAdapter?
-    private let profileStore: LocalProfileStore?
+    private let keyboardProfileStore: KeyboardProfileStore?
     private let experimentalStore: ExperimentalKeyboardStore?
+    private let keyboardSelectionStore: KeyboardSelectionStore?
+    private let keyboardSelectionSnapshotStore: KeyboardSelectionSnapshotStore?
     private let previewStore: SignalPreviewStore?
     private let diagnosticSnapshotProvider: (@Sendable () -> DiagnosticSnapshot)?
     private var diagnosticLanguage: AppLanguage
@@ -58,9 +64,11 @@ final class KeyphoreAppState: ObservableObject {
         lifecycle: KeyphoreLifecycle,
         guidedSetup: GuidedSetup? = nil,
         systemHealth: SystemKeyphoreHealthAdapter? = nil,
-        profileStore: LocalProfileStore? = nil,
+        keyboardProfileStore: KeyboardProfileStore? = nil,
         previewStore: SignalPreviewStore? = nil,
         experimentalStore: ExperimentalKeyboardStore? = nil,
+        keyboardSelectionStore: KeyboardSelectionStore? = nil,
+        keyboardSelectionSnapshotStore: KeyboardSelectionSnapshotStore? = nil,
         managedRemoval: ManagedRemoval? = nil,
         agentIntegrations: SystemAgentIntegrations? = nil,
         updateRuntime: (any KeyphoreRuntimeManaging)? = nil,
@@ -72,10 +80,20 @@ final class KeyphoreAppState: ObservableObject {
     ) {
         self.lifecycle = lifecycle
         self.systemHealth = systemHealth
-        self.profileStore = profileStore
+        self.keyboardProfileStore = keyboardProfileStore
+        profileModel = nil
         self.previewStore = previewStore
         self.experimentalStore = experimentalStore
         experimentalRecords = (try? experimentalStore?.records()) ?? []
+        self.keyboardSelectionStore = keyboardSelectionStore
+        self.keyboardSelectionSnapshotStore = keyboardSelectionSnapshotStore
+        if let keyboardSelectionStore {
+            do { desiredKeyboardModel = try keyboardSelectionStore.load() }
+            catch { desiredKeyboardModel = nil; keyboardSelectionFailed = true }
+        } else {
+            desiredKeyboardModel = nil
+        }
+        keyboardSelectionSnapshot = keyboardSelectionSnapshotStore?.load()
         self.managedRemoval = managedRemoval
         self.agentIntegrations = agentIntegrations
         self.updateRuntime = updateRuntime
@@ -105,9 +123,6 @@ final class KeyphoreAppState: ObservableObject {
         self.guidedSetup = guidedSetup
         setupSnapshot = Self.initialSetupSnapshot(for: initialSnapshot)
         agentSourceSnapshots = initialAgentSnapshots
-        if let profileStore {
-            validationFailed = (try? profileStore.load()) == nil
-        }
         if let previewStore {
             do {
                 previewRecord = try previewStore.load()
@@ -144,13 +159,15 @@ final class KeyphoreAppState: ObservableObject {
                 case .failure:
                     self.setupFailed = true
                 }
-                self.snapshot = self.lifecycle.refresh()
+                self.refreshKeyboardSelection()
+                self.refreshLifecycleSnapshot()
                 self.isStarting = false
                 self.refreshAgentIntegrations()
             }
         } else {
             refreshAgentIntegrations()
         }
+        refreshLifecycleSnapshot()
         durableStatusTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
             [weak self] _ in
             Task { @MainActor in
@@ -165,7 +182,9 @@ final class KeyphoreAppState: ObservableObject {
         let health: any KeyphoreHealthProviding
         let guidedSetup: GuidedSetup?
         let systemHealth: SystemKeyphoreHealthAdapter?
-        let profileStore: LocalProfileStore?
+        let keyboardProfileStore: KeyboardProfileStore?
+        let keyboardSelectionStore: KeyboardSelectionStore?
+        let keyboardSelectionSnapshotStore: KeyboardSelectionSnapshotStore?
         let previewStore: SignalPreviewStore?
         let profiles: any LocalProfileProviding
         let runtime: any KeyphoreRuntimeManaging
@@ -182,11 +201,17 @@ final class KeyphoreAppState: ObservableObject {
             let adapter = SystemKeyphoreHealthAdapter(isConfigured: false)
             systemHealth = adapter
             health = adapter
-            let storedProfile = LocalProfileStore(url: KeyphoreRuntimePaths.localProfileURL())
+            let storedProfiles = KeyboardProfileStore(directory: KeyphoreRuntimePaths.keyboardProfilesDirectory())
+            let storedSelection = KeyboardSelectionStore(url: KeyphoreRuntimePaths.keyboardSelectionURL())
+            let storedSelectionSnapshot = KeyboardSelectionSnapshotStore(
+                url: KeyphoreRuntimePaths.keyboardSelectionSnapshotURL()
+            )
             let storedPreview = SignalPreviewStore(url: KeyphoreRuntimePaths.signalPreviewURL())
-            profileStore = storedProfile
+            keyboardProfileStore = storedProfiles
+            keyboardSelectionStore = storedSelection
+            keyboardSelectionSnapshotStore = storedSelectionSnapshot
             previewStore = storedPreview
-            profiles = SystemProfileAdapter(store: storedProfile)
+            profiles = FixtureProfileAdapter()
             let appVersion = Self.appVersion()
             let macOSVersion = Self.macOSVersion()
             diagnosticSnapshotProvider = {
@@ -207,7 +232,9 @@ final class KeyphoreAppState: ObservableObject {
             health = FixtureHealthAdapter(health: fixture.health)
             guidedSetup = nil
             systemHealth = nil
-            profileStore = nil
+            keyboardProfileStore = nil
+            keyboardSelectionStore = nil
+            keyboardSelectionSnapshotStore = nil
             previewStore = nil
             profiles = FixtureProfileAdapter()
             runtime = FixtureRuntimeAdapter()
@@ -236,9 +263,11 @@ final class KeyphoreAppState: ObservableObject {
             lifecycle: lifecycle,
             guidedSetup: guidedSetup,
             systemHealth: systemHealth,
-            profileStore: profileStore,
+            keyboardProfileStore: keyboardProfileStore,
             previewStore: previewStore,
             experimentalStore: environment["KEYPHORE_ACCEPTANCE_FIXTURE"] == nil ? ExperimentalKeyboardStore() : nil,
+            keyboardSelectionStore: keyboardSelectionStore,
+            keyboardSelectionSnapshotStore: keyboardSelectionSnapshotStore,
             managedRemoval: managedRemoval,
             agentIntegrations: agentIntegrations,
             updateRuntime: runtime,
@@ -251,7 +280,112 @@ final class KeyphoreAppState: ObservableObject {
     func refresh() {
         refreshSetupSnapshot()
         refreshAgentIntegrations()
-        snapshot = lifecycle.refresh()
+        refreshKeyboardSelection()
+        refreshLifecycleSnapshot()
+    }
+
+    var canSelectKeyboard: Bool { keyboardSelectionStore != nil }
+
+    var keyboardSelectionOptions: [KeyboardTargetOption] {
+        keyboardTargetOptions(desired: desiredKeyboardModel, snapshot: keyboardSelectionSnapshot)
+    }
+
+    var keyboardSelectionMessageKey: AppCopyKey? {
+        keyboardSelectionStatusKey(desired: desiredKeyboardModel, snapshot: keyboardSelectionSnapshot,
+                                   failed: keyboardSelectionFailed)
+    }
+
+    var keyboardSelectionActiveLabel: String {
+        keyboardSelectionSnapshot?.activeModel?.rawValue ?? AppCopy.value(.keyboardSelectionNone)
+    }
+
+    func keyboardTargetLabel(_ option: KeyboardTargetOption) -> String {
+        guard let model = option.model else { return AppCopy.value(.keyboardSelectionAutomatic) }
+        guard option.connectedCount > 0 else {
+            return "\(model.rawValue) · \(AppCopy.value(.keyboardSelectionDisconnected))"
+        }
+        return "\(model.rawValue) · " + String(format: AppCopy.value(.keyboardSelectionConnectedCount), option.connectedCount)
+    }
+
+    func canRequestKeyboardSelection(_ model: SupportedKeyboardModel?) -> Bool {
+        guard keyboardSelectionStore != nil, !isStarting, !setupIsWorking, !removalIsWorking,
+              agentIntegrationWorkingSource == nil, removalSnapshot.status != .completed,
+              let fresh = keyboardSelectionSnapshotStore?.load(), !fresh.inventory.isEmpty else { return false }
+        if let model {
+            return SupportedKeyboardModel.selectableModels.contains(model)
+                && fresh.inventory.first { $0.model == model }?.count == 1
+        }
+        return fresh.inventory.contains { $0.count > 0 }
+    }
+
+    var activeKeyboardModel: SupportedKeyboardModel? {
+        if let keyboardSelectionSnapshot { return keyboardSelectionSnapshot.activeModel }
+        return snapshot.keyboardHealth.model
+    }
+
+    var keyboardSelectionAllowsPreview: Bool {
+        guard keyboardSelectionStore != nil else { return true }
+        guard keyboardSelectionIsApplied, let keyboardSelectionSnapshot,
+              let fresh = keyboardSelectionSnapshotStore?.load(), fresh.phase == .applied,
+              fresh.activeModel == keyboardSelectionSnapshot.activeModel,
+              fresh.desiredModel == keyboardSelectionSnapshot.desiredModel,
+              let activeModel = fresh.activeModel else { return false }
+        do {
+            guard try keyboardSelectionStore?.load() == fresh.desiredModel else { return false }
+        } catch { return false }
+        return snapshot.keyboardHealth.isProtocolHealthy
+            && snapshot.keyboardHealth.model == activeModel
+    }
+
+    var canPreviewLighting: Bool {
+        previewStore != nil && !isStarting && !setupIsWorking && !removalIsWorking
+            && agentIntegrationWorkingSource == nil && !quitFailed
+            && removalSnapshot.status != .completed
+            && snapshot.keyboardHealth.isProtocolHealthy && keyboardSelectionAllowsPreview
+    }
+
+    var keyboardSelectionIsApplied: Bool {
+        guard keyboardSelectionStore != nil else { return true }
+        guard !keyboardSelectionFailed, let keyboardSelectionSnapshot else { return false }
+        return desiredKeyboardModel == keyboardSelectionSnapshot.desiredModel
+            && keyboardSelectionSnapshot.phase == .applied
+            && keyboardSelectionSnapshot.activeModel != nil
+    }
+
+    var keyboardProfileAllowsEditing: Bool {
+        guard keyboardProfileStore != nil else { return true }
+        guard keyboardSelectionIsApplied, let keyboardSelectionSnapshot else { return false }
+        return profileModel == keyboardSelectionSnapshot.activeModel && profileModel != nil
+    }
+
+    @discardableResult
+    func requestKeyboardSelection(_ model: SupportedKeyboardModel?) -> Bool {
+        // A menu can outlive a USB topology change. Revalidate at the action boundary.
+        refreshKeyboardSelection()
+        guard let keyboardSelectionStore, canRequestKeyboardSelection(model) else {
+            keyboardSelectionFailed = true
+            return false
+        }
+        do {
+            try keyboardSelectionStore.save(model)
+            desiredKeyboardModel = model
+            keyboardSelectionFailed = false
+            return true
+        } catch {
+            keyboardSelectionFailed = true
+            return false
+        }
+    }
+
+    func refreshKeyboardSelection() {
+        guard let keyboardSelectionStore else { return }
+        do {
+            desiredKeyboardModel = try keyboardSelectionStore.load()
+            keyboardSelectionFailed = false
+        } catch {
+            keyboardSelectionFailed = true
+        }
+        keyboardSelectionSnapshot = keyboardSelectionSnapshotStore?.load()
     }
 
     var canManageAgentIntegrations: Bool { agentIntegrations != nil }
@@ -403,7 +537,8 @@ final class KeyphoreAppState: ObservableObject {
                 apply(configured)
                 lastSetupInspection = .now
                 self.loginLaunchEnabled = guidedSetup.loginLaunchEnabled()
-                snapshot = lifecycle.refresh()
+                refreshKeyboardSelection()
+                refreshLifecycleSnapshot()
                 refreshDiagnosticReport()
             } catch {
                 setupFailed = true
@@ -426,7 +561,8 @@ final class KeyphoreAppState: ObservableObject {
                 }.value
                 apply(configured)
                 lastSetupInspection = .now
-                snapshot = lifecycle.refresh()
+                refreshKeyboardSelection()
+                refreshLifecycleSnapshot()
                 refreshDiagnosticReport()
             } catch {
                 setupFailed = true
@@ -524,29 +660,45 @@ final class KeyphoreAppState: ObservableObject {
         }
     }
 
-    func updateAppearance(_ appearance: SignalAppearance, for signal: CodexSignal) {
-        save(snapshot.profile.replacingAppearance(appearance, for: signal))
+    func updateAppearance(
+        _ appearance: SignalAppearance, for signal: CodexSignal,
+        expectedModel: SupportedKeyboardModel
+    ) {
+        let preset: LightingPreset = switch signal {
+        case .execution: .execution
+        case .attention: .attention
+        case .completion: .completion
+        }
+        updateAppearance(appearance, for: preset, expectedModel: expectedModel)
     }
 
-    func updateAppearance(_ appearance: SignalAppearance, for preset: LightingPreset) {
-        if save(snapshot.profile.replacingAppearance(appearance, forPreset: preset)), preset == .idle {
-            beginSignalPreview(for: .idle)
+    func updateAppearance(
+        _ appearance: SignalAppearance, for preset: LightingPreset,
+        expectedModel: SupportedKeyboardModel
+    ) {
+        if save(snapshot.profile.replacingAppearance(appearance, forPreset: preset), expectedModel: expectedModel) {
+            beginSignalPreview(for: preset, expectedModel: expectedModel)
         }
     }
 
-    func resetSignalColor(for signal: CodexSignal, zone: LightingZone) {
+    func resetSignalColor(
+        for signal: CodexSignal, zone: LightingZone,
+        expectedModel: SupportedKeyboardModel
+    ) {
         let appearance = snapshot.profile.appearance(for: signal)
         let currentZone = appearance.appearance(for: zone)
         let defaultColor = LocalProfile.default.appearance(for: signal).appearance(for: zone).color
         updateAppearance(appearance.replacingAppearance(ZoneAppearance(
             effect: currentZone.effect, color: defaultColor, colorMode: .custom,
             brightness: currentZone.brightness, speed: currentZone.speed, direction: currentZone.direction
-        ), for: zone), for: signal)
+        ), for: zone), for: signal, expectedModel: expectedModel)
     }
 
     @discardableResult
-    func updateControlledZones(_ zones: ControlledZones) -> Bool {
-        save(snapshot.profile.replacingControlledZones(zones))
+    func updateControlledZones(
+        _ zones: ControlledZones, expectedModel: SupportedKeyboardModel
+    ) -> Bool {
+        save(snapshot.profile.replacingControlledZones(zones), expectedModel: expectedModel)
     }
 
     func updatePreferences(_ preferences: AppPreferences) {
@@ -556,7 +708,9 @@ final class KeyphoreAppState: ObservableObject {
         diagnosticReport = DiagnosticReport(snapshot: latestDiagnosticSnapshot, language: diagnosticLanguage)
     }
 
-    func updateCompletionDisplayDuration(_ duration: CompletionDisplayDuration) {
+    func updateCompletionDisplayDuration(
+        _ duration: CompletionDisplayDuration, expectedModel: SupportedKeyboardModel
+    ) {
         let profile = snapshot.profile
         save(
             LocalProfile(
@@ -566,7 +720,8 @@ final class KeyphoreAppState: ObservableObject {
                 idle: profile.idle,
                 completionDisplayDuration: duration,
                 controlledZones: profile.controlledZones
-            )
+            ),
+            expectedModel: expectedModel
         )
     }
 
@@ -574,10 +729,18 @@ final class KeyphoreAppState: ObservableObject {
         DiagnosticReport(snapshot: latestDiagnosticSnapshot, language: diagnosticLanguage, preview: previewRecord)
     }
 
-    func beginSignalPreview(for preset: LightingPreset? = nil) {
-        guard menuState == .ready, let previewStore else { return }
+    func beginSignalPreview(for preset: LightingPreset? = nil, expectedModel: SupportedKeyboardModel? = nil) {
+        guard !isStarting else { return }
+        // Physical verification depends on the current Companion and target, not Agent setup.
+        refreshKeyboardSelection()
+        refreshLifecycleSnapshot()
+        guard canPreviewLighting, let previewStore else { return }
+        let targetModel = keyboardSelectionStore == nil
+            ? snapshot.keyboardHealth.model
+            : keyboardSelectionSnapshot?.activeModel
+        guard expectedModel == nil || targetModel == expectedModel else { return }
         do {
-            previewRecord = try previewStore.begin(preset: preset)
+            previewRecord = try previewStore.begin(preset: preset, targetModel: targetModel)
             settingsFailed = false
             previewStateFailed = false
         } catch {
@@ -625,7 +788,8 @@ final class KeyphoreAppState: ObservableObject {
         if setupSnapshot.phase.isConfigured {
             refreshSetupSnapshot(at: now)
         }
-        snapshot = lifecycle.refresh()
+        refreshKeyboardSelection()
+        refreshLifecycleSnapshot()
         refreshStoredState()
     }
 
@@ -657,7 +821,8 @@ final class KeyphoreAppState: ObservableObject {
     private func applyAgentSnapshots(_ snapshots: [AgentSourceSnapshot]) {
         agentSourceSnapshots = snapshots
         systemHealth?.isConfigured = setupSnapshot.phase.isConfigured || hasReadyAgentSource
-        snapshot = lifecycle.refresh()
+        refreshKeyboardSelection()
+        refreshLifecycleSnapshot()
         refreshDiagnosticReport()
     }
 
@@ -667,11 +832,17 @@ final class KeyphoreAppState: ObservableObject {
     }
 
     @discardableResult
-    private func save(_ profile: LocalProfile) -> Bool {
-        guard let profileStore else { return false }
+    private func save(_ profile: LocalProfile, expectedModel: SupportedKeyboardModel) -> Bool {
         do {
-            try profileStore.save(profile)
-            snapshot = lifecycle.refresh()
+            guard let keyboardProfileStore, let keyboardSelectionStore,
+                  let fresh = keyboardSelectionSnapshotStore?.load(), fresh.phase == .applied,
+                  fresh.activeModel == expectedModel, profileModel == expectedModel,
+                  try keyboardSelectionStore.load() == fresh.desiredModel else {
+                settingsFailed = true
+                return false
+            }
+            try keyboardProfileStore.save(profile, for: expectedModel)
+            refreshLifecycleSnapshot()
             settingsFailed = false
             validationFailed = false
             return true
@@ -697,14 +868,6 @@ final class KeyphoreAppState: ObservableObject {
     private func refreshStoredState() {
         do { experimentalRecords = try experimentalStore?.records() ?? [] }
         catch { settingsFailed = true; experimentalRecords = [] }
-        if let profileStore {
-            do {
-                _ = try profileStore.load()
-                validationFailed = false
-            } catch {
-                validationFailed = true
-            }
-        }
         if let previewStore {
             do {
                 previewRecord = try previewStore.load()
@@ -712,6 +875,44 @@ final class KeyphoreAppState: ObservableObject {
             } catch {
                 previewStateFailed = true
             }
+        }
+    }
+
+    private func refreshLifecycleSnapshot() {
+        let refreshed = lifecycle.refresh()
+        guard let keyboardProfileStore else {
+            snapshot = refreshed
+            return
+        }
+        guard !keyboardSelectionFailed, let selection = keyboardSelectionSnapshot,
+              desiredKeyboardModel == selection.desiredModel,
+              selection.phase == .applied, let model = selection.activeModel else {
+            profileModel = nil
+            snapshot = LifecycleSnapshot(
+                health: refreshed.health, menuState: refreshed.menuState,
+                durableStatus: refreshed.durableStatus, currentSignal: .signalOff,
+                profile: .default
+            )
+            return
+        }
+        do {
+            let profile = try keyboardProfileStore.load(for: model)
+            profileModel = model
+            validationFailed = false
+            snapshot = LifecycleSnapshot(
+                health: refreshed.health, menuState: refreshed.menuState,
+                durableStatus: refreshed.durableStatus,
+                currentSignal: profile.aggregateSignal(for: refreshed.durableStatus),
+                profile: profile
+            )
+        } catch {
+            profileModel = model
+            validationFailed = true
+            snapshot = LifecycleSnapshot(
+                health: refreshed.health, menuState: refreshed.menuState,
+                durableStatus: refreshed.durableStatus, currentSignal: .signalOff,
+                profile: .default
+            )
         }
     }
 
@@ -788,14 +989,6 @@ private struct FixtureHealthAdapter: KeyphoreHealthProviding {
 
 private struct FixtureProfileAdapter: LocalProfileProviding {
     func currentProfile() -> LocalProfile { .default }
-}
-
-private struct SystemProfileAdapter: LocalProfileProviding {
-    let store: LocalProfileStore
-
-    func currentProfile() -> LocalProfile {
-        (try? store.load()) ?? .default
-    }
 }
 
 private struct FixtureDurableStatusAdapter: DurableStatusProviding {

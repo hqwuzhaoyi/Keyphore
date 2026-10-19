@@ -45,8 +45,8 @@ final class DefaultSignalProfileTests: XCTestCase {
         XCTAssertEqual(NativeLightingEffect.backlightSinglePoint.wireID, 12)
         XCTAssertEqual(NativeLightingEffect.backlightWaveBand.wireID, 16)
         XCTAssertEqual(NativeLightingEffect.backlightDiagonal.wireID, 20)
-        XCTAssertEqual(NativeLightingEffect.catalog(for: .strip).map(\.wireID), [3, 4, 0, 1, 2])
-        XCTAssertEqual(NativeLightingEffect.catalog(for: .backlight).map(\.wireID), Array(1...20))
+        XCTAssertEqual(NativeLightingEffect.catalog(for: .strip).compactMap(\.wireID), [3, 4, 0, 1, 2])
+        XCTAssertEqual(NativeLightingEffect.catalog(for: .backlight).compactMap(\.wireID), Array(1...20))
         XCTAssertTrue(NativeLightingEffect.backlightSpectrum.supportsColor)
         XCTAssertTrue(NativeLightingEffect.backlightFlowers.supportsColor)
         XCTAssertFalse(NativeLightingEffect.stripRhythm.supportsSpeed)
@@ -110,7 +110,8 @@ final class NativeLightingFixture {
     deinit { try? FileManager.default.removeItem(at: directory) }
 
     func companion(profileProvider: (() throws -> LocalProfile)? = nil) -> KeyphoreCompanion {
-        KeyphoreCompanion(store: status, profileProvider: profileProvider ?? { [profiles] in try profiles.load() },
+        let provider = profileProvider ?? { [profiles] in try profiles.load() }
+        return KeyphoreCompanion(store: status, profileProvider: { _ in try provider() },
                          lighting: lighting, keyboardHealthStore: health, previewStore: preview,
                          signalOffAcknowledgement: acknowledgement, quitGate: quit, ownershipStore: ownership)
     }
@@ -122,13 +123,15 @@ final class NativeLightingFixture {
     }
 }
 
-final class NativeTestLighting: CompanionLightingEvidenceApplying, CompanionLightingVerifying, CompanionLightingRecovering {
+final class NativeTestLighting: CompanionLightingEvidenceApplying, CompanionLightingVerifying, CompanionLightingRecovering, CompanionKeyboardIdentifying {
+    var connectedModel: SupportedKeyboardModel? { .air75V3 }
     var behaviors: [LightingBehavior] = []
     var checked: [LightingBehavior] = []
     var actual: LightingBehavior?
     var error: Error?
     var displaysExpected = true
     var preserved = true
+    var protection: UnmanagedZoneProtection = .readback
     var invalidations = 0
     var willApply: (LightingBehavior) throws -> Void = { _ in }
     var didApply: () -> Void = {}
@@ -143,7 +146,7 @@ final class NativeTestLighting: CompanionLightingEvidenceApplying, CompanionLigh
         didApply()
         return NuPhyIOEvidence(protocolReadbackSucceeded: true, visualConfirmation: .notRequested,
                                mainState: [], rhythmBefore: [1, 2, 3], rhythmAfter: [4, 5, 6],
-                               unmanagedZonesPreserved: preserved)
+                               unmanagedZonesPreserved: preserved, unmanagedZoneProtection: protection)
     }
 
     func displays(_ behavior: LightingBehavior) throws -> Bool {

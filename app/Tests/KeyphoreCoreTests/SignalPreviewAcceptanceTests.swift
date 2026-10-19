@@ -3,6 +3,33 @@ import KeyphoreCore
 import XCTest
 
 final class SignalPreviewAcceptanceTests: XCTestCase {
+    func testVIAChannelIsolationSurvivesPersistenceWithoutClaimingSideLightReadback() throws {
+        let fixture = try NativeLightingFixture()
+        fixture.lighting.protection = .untouchedProtocolChannel
+        let controller = SignalPreviewController(store: fixture.preview, lighting: fixture.lighting)
+        _ = try fixture.preview.begin(at: .milliseconds(0))
+        _ = try controller.poll(at: .milliseconds(0), profile: .default)
+        let record = try XCTUnwrap(SignalPreviewStore(url: fixture.preview.url).load())
+        XCTAssertTrue(record.protocolReadbackSucceeded)
+        XCTAssertTrue(record.unmanagedZonesPreserved)
+        XCTAssertEqual(record.unmanagedZoneProtection, .untouchedProtocolChannel)
+        let report = DiagnosticReport(snapshot: DiagnosticSnapshot(
+            appVersion: "test", macOSVersion: "test", codexHosts: [], integration: .notConfigured,
+            keyboard: .connected(protocolHealthy: true, model: .air75V2)
+        ), language: .english, preview: record)
+        let fields = try XCTUnwrap(report.preview)
+        XCTAssertTrue(fields.contains {
+            $0.contains(AppCopy.value(.diagnosticChannelIsolation, language: .english))
+        })
+        XCTAssertFalse(fields.contains {
+            $0 == "\(AppCopy.value(.diagnosticPreviewRhythm, language: .english)): \(AppCopy.value(.diagnosticHealthy, language: .english))"
+        })
+        fixture.lighting.protection = .readback
+        let started = try XCTUnwrap(record.stageStartedAt)
+        _ = try controller.poll(at: .milliseconds(started.millisecondsSince1970 + 6_000), profile: .default)
+        XCTAssertEqual(try fixture.preview.load()?.unmanagedZoneProtection, .untouchedProtocolChannel)
+    }
+
     func testSelectedSignalStartsDirectlyHoldsSixSecondsAndRestoresLatestAggregate() throws {
         for signal in [LightingPreset.attention, .completion] {
             let fixture = try NativeLightingFixture()
@@ -115,7 +142,7 @@ final class SignalPreviewAcceptanceTests: XCTestCase {
         XCTAssertEqual(try fixture.preview.load()?.phase, .failed)
         XCTAssertEqual(fixture.lighting.behaviors.last, .off(for: .strip))
         XCTAssertTrue(fixture.acknowledgement.isAcknowledged)
-        XCTAssertEqual(try fixture.ownership.load(), [])
+        XCTAssertEqual(try fixture.ownership.load().zones, [])
     }
 
     func testNativePreviewHoldsEffectsWithoutRewritingFramesAndRestoresCurrentAggregate() throws {
@@ -128,7 +155,7 @@ final class SignalPreviewAcceptanceTests: XCTestCase {
         for time in stride(from: UInt64(100), through: 5_900, by: 100) {
             try companion.sync(at: .milliseconds(time))
             XCTAssertEqual(try Data(contentsOf: fixture.preview.url), checkpoint)
-            XCTAssertEqual(fixture.health.load(at: .milliseconds(time)), .connected(protocolHealthy: true))
+            XCTAssertEqual(fixture.health.load(at: .milliseconds(time)), .connected(protocolHealthy: true, model: .air75V3))
         }
         XCTAssertEqual(fixture.lighting.behaviors.count, 1)
         for time: UInt64 in [6_000, 12_000, 14_000] { try companion.sync(at: .milliseconds(time)) }
@@ -146,13 +173,13 @@ final class SignalPreviewAcceptanceTests: XCTestCase {
         let fixture = try NativeLightingFixture()
         var clock = ContinuousClock.now
         fixture.lighting.didApply = { clock = clock.advanced(by: .milliseconds(2_500)) }
-        let controller = SignalPreviewController(store: fixture.preview, profileProvider: { .default },
+        let controller = SignalPreviewController(store: fixture.preview,
                                                 lighting: fixture.lighting, clock: { clock })
         _ = try fixture.preview.begin(at: .milliseconds(0))
-        _ = try controller.poll(at: .milliseconds(0))
-        _ = try controller.poll(at: .milliseconds(8_499))
+        _ = try controller.poll(at: .milliseconds(0), profile: .default)
+        _ = try controller.poll(at: .milliseconds(8_499), profile: .default)
         XCTAssertEqual(fixture.lighting.behaviors.count, 1)
-        _ = try controller.poll(at: .milliseconds(8_500))
+        _ = try controller.poll(at: .milliseconds(8_500), profile: .default)
         XCTAssertEqual(try fixture.preview.load()?.currentPreset, .attention)
         fixture.lighting.didApply = {}
     }
@@ -173,9 +200,9 @@ final class SignalPreviewAcceptanceTests: XCTestCase {
     func testUnmanagedZoneEvidenceFailureFailsPresentation() throws {
         let fixture = try NativeLightingFixture()
         fixture.lighting.preserved = false
-        let controller = SignalPreviewController(store: fixture.preview, profileProvider: { .default }, lighting: fixture.lighting)
+        let controller = SignalPreviewController(store: fixture.preview, lighting: fixture.lighting)
         _ = try fixture.preview.begin(at: .milliseconds(0))
-        XCTAssertEqual(try controller.poll(at: .milliseconds(0)), .finished)
+        XCTAssertEqual(try controller.poll(at: .milliseconds(0), profile: .default), .finished)
         XCTAssertEqual(try fixture.preview.load()?.phase, .failed)
         XCTAssertEqual(try fixture.preview.load()?.unmanagedZonesPreserved, false)
     }

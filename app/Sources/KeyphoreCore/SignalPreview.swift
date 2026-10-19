@@ -15,6 +15,7 @@ public struct SignalPreviewRecord: Codable, Equatable, Sendable {
     public let id: String
     public let requestedAt: StatusTimestamp
     public let requestedPreset: LightingPreset?
+    public let targetModel: SupportedKeyboardModel?
     public var phase: SignalPreviewPhase
     public var currentPreset: LightingPreset?
     public var stageStartedAt: StatusTimestamp?
@@ -22,6 +23,7 @@ public struct SignalPreviewRecord: Codable, Equatable, Sendable {
     public var completedPresets: [LightingPreset]
     public var protocolReadbackSucceeded: Bool
     public var unmanagedZonesPreserved: Bool
+    public var unmanagedZoneProtection: UnmanagedZoneProtection = .readback
     public var visualConfirmation: VisualConfirmation
 }
 
@@ -40,11 +42,13 @@ public final class SignalPreviewStore: @unchecked Sendable {
     }
 
     @discardableResult
-    public func begin(preset: LightingPreset? = nil, at timestamp: StatusTimestamp = .now) throws -> SignalPreviewRecord {
+    public func begin(preset: LightingPreset? = nil, targetModel: SupportedKeyboardModel? = nil,
+                      at timestamp: StatusTimestamp = .now) throws -> SignalPreviewRecord {
         let record = SignalPreviewRecord(
             id: UUID().uuidString,
             requestedAt: timestamp,
             requestedPreset: preset,
+            targetModel: targetModel,
             phase: .pending,
             currentPreset: nil,
             stageStartedAt: nil,
@@ -127,31 +131,51 @@ public enum SignalPreviewPollResult: Equatable, Sendable {
     case active
     case finished
     case superseded
+    case waitingForTarget
 }
 
 public final class SignalPreviewController {
     private static let presetOrder: [LightingPreset] = [.execution, .attention, .completion]
     private let store: SignalPreviewStore
-    private let profileProvider: () throws -> LocalProfile
     private let lighting: any CompanionLightingEvidenceApplying
     private let clock: () -> ContinuousClock.Instant
     private var lastPreviewID: String?
     private var lastBehavior: LightingBehavior?
     private var lastVerifiedAt: StatusTimestamp?
 
-    public init(store: SignalPreviewStore, profileProvider: @escaping () throws -> LocalProfile,
-                lighting: any CompanionLightingEvidenceApplying,
+    public init(store: SignalPreviewStore, lighting: any CompanionLightingEvidenceApplying,
                 clock: @escaping () -> ContinuousClock.Instant = { .now }) {
         self.store = store
-        self.profileProvider = profileProvider
         self.lighting = lighting
         self.clock = clock
     }
 
-    public func poll(at now: StatusTimestamp = .now, profile snapshot: LocalProfile? = nil) throws -> SignalPreviewPollResult {
+    public func poll(at now: StatusTimestamp = .now, profile: LocalProfile,
+                     targetModel: SupportedKeyboardModel? = nil,
+                     selectionStore: KeyboardSelectionStore? = nil) throws -> SignalPreviewPollResult {
         guard var record = try? store.load() else { return .inactive }
+        if record.phase == .pending || record.phase == .presenting, let targetModel,
+           record.targetModel != targetModel {
+            lastPreviewID = nil
+            lastBehavior = nil
+            lastVerifiedAt = nil
+            // Only a still-requested future target may wait. An abandoned target must not
+            // hold the current keyboard's live signal indefinitely.
+            guard record.targetModel != nil, let selectionStore else { return try fail(&record) }
+            guard try selectionStore.load() == record.targetModel else { return try fail(&record) }
+            if record.phase == .presenting {
+                record.phase = .pending
+                record.currentPreset = nil
+                record.stageStartedAt = nil
+                record.presentationIsLit = false
+                record.completedPresets = []
+                record.protocolReadbackSucceeded = false
+                record.unmanagedZonesPreserved = false
+                guard try store.save(record) else { return .superseded }
+            }
+            return .waitingForTarget
+        }
         do {
-            let profile = try snapshot ?? profileProvider()
             switch record.phase {
             case .pending:
                 return try present(record.requestedPreset ?? .execution, record: &record, profile: profile, at: now)
@@ -164,12 +188,18 @@ public final class SignalPreviewController {
     }
 
     public func hasActivePreview() throws -> Bool {
-        guard let record = try? store.load() else { return false }
-        return record.phase == .pending || record.phase == .presenting
+        activeRequestID() != nil
     }
 
-    public func cancel() throws {
+    public func activeRequestID() -> String? {
+        guard let record = try? store.load(), record.phase == .pending || record.phase == .presenting else { return nil }
+        return record.id
+    }
+
+    public func cancel(requestID: String? = nil, ownedBy targetModel: SupportedKeyboardModel? = nil) throws {
         guard var record = try store.load(), record.phase == .pending || record.phase == .presenting else { return }
+        guard requestID == nil || requestID == record.id else { return }
+        if let targetModel, let requested = record.targetModel, requested != targetModel { return }
         _ = try fail(&record)
     }
 
@@ -180,7 +210,7 @@ public final class SignalPreviewController {
             return try present(signal, record: &record, profile: profile, at: now)
         }
         let dynamic = [behavior.backlight, behavior.strip].contains {
-            guard case .signal(let appearance) = $0, appearance.brightness.percent > 0 else { return false }
+            guard case .signal(let appearance) = $0, appearance.brightness.percent > 0, !appearance.effect.isOff else { return false }
             return ![NativeLightingEffect.backlightStatic, .backlightGradient, .stripStatic].contains(appearance.effect)
         }
         let hold: UInt64 = record.requestedPreset != nil || dynamic ? 6_000 : 2_000
@@ -222,6 +252,9 @@ public final class SignalPreviewController {
         record.presentationIsLit = !behavior.isOff
         record.protocolReadbackSucceeded = true
         record.unmanagedZonesPreserved = true
+        if evidence.unmanagedZoneProtection == .untouchedProtocolChannel {
+            record.unmanagedZoneProtection = .untouchedProtocolChannel
+        }
         lastPreviewID = record.id
         lastBehavior = behavior
         lastVerifiedAt = record.stageStartedAt

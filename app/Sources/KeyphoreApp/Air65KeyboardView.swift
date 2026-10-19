@@ -4,6 +4,7 @@ import KeyphoreCore
 struct Air65KeyboardView: View {
     let presentation: KeyboardSignalPresentation
     var layout: Layout = .air65
+    var model: SupportedKeyboardModel? = nil
 
     enum Layout {
         case air65, air75ANSI, kick75ANSI
@@ -157,12 +158,16 @@ struct Air65KeyboardView: View {
         }
         .aspectRatio(416 / layout.height, contentMode: .fit)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(AppCopy.value(layout.illustrationKey))
+        .accessibilityLabel(AppCopy.value(keyboardIllustrationKey(for: layout, model: model)))
         .accessibilityValue(AppCopy.value(!presentation.isControlAvailable ? .keyboardUnverified
             : presentation.signal == .signalOff && presentation.isLit ? .settingsIdle
             : presentation.signal.presentation(in: .default).copyKey))
-        .accessibilityHint(AppCopy.value(!presentation.isControlAvailable ? .keyboardUnverifiedDetail : .rhythmLightUnchanged))
-        .help(AppCopy.value(!presentation.isControlAvailable ? .keyboardUnverifiedDetail : .rhythmLightUnchanged))
+        .accessibilityHint(AppCopy.value(keyboardLightingHelp(
+            for: model, isControlAvailable: presentation.isControlAvailable
+        )))
+        .help(AppCopy.value(keyboardLightingHelp(
+            for: model, isControlAvailable: presentation.isControlAvailable
+        )))
     }
 
     @ViewBuilder
@@ -244,13 +249,26 @@ struct Air65KeyboardView: View {
 
     private func rhythmLight(scale: CGFloat, height: CGFloat) -> some View {
         Capsule()
-            .fill(presentation.controlledZones.contains(.strip)
+            .fill(model != .air75V2 && presentation.controlledZones.contains(.strip)
                   ? presentation.color(for: .strip).opacity(presentation.opacity(for: .strip))
                   : Color.secondary.opacity(0.25))
             .frame(width: 2.5 * scale, height: height)
             .shadow(color: presentation.color(for: .strip)
-                .opacity(presentation.opacity(for: .strip) * 0.4), radius: 2 * scale)
+                .opacity(model == .air75V2 ? 0 : presentation.opacity(for: .strip) * 0.4), radius: 2 * scale)
     }
+}
+
+func keyboardLightingHelp(
+    for model: SupportedKeyboardModel?, isControlAvailable: Bool
+) -> AppCopyKey {
+    if !isControlAvailable { return .keyboardUnverifiedDetail }
+    return model == .air75V2 ? .diagnosticChannelIsolation : .rhythmLightUnchanged
+}
+
+func keyboardIllustrationKey(
+    for layout: Air65KeyboardView.Layout, model: SupportedKeyboardModel?
+) -> AppCopyKey {
+    model == .air75V2 ? .air75V2KeyboardIllustration : layout.illustrationKey
 }
 
 struct CandidateKeyboardIllustration: View {
@@ -337,21 +355,25 @@ struct CandidateKeyboardIllustration: View {
 }
 
 struct CandidateKeyboardCatalogView: View {
-    private enum Model: Hashable {
+    enum Model: Hashable {
         case air65ANSI
+        case air75V2
         case candidate(CandidateKeyboardModel)
 
         var name: String {
             switch self {
             case .air65ANSI: "Air65 V3 ANSI"
+            case .air75V2: "Air75 V2"
             case .candidate(.air75V3): "Air75 V3 ANSI"
             case .candidate(let model): model.rawValue
             }
         }
 
+        var detailKey: AppCopyKey? { self == .air75V2 ? .candidateAir75V2Detail : nil }
+
     }
 
-    private let models = ([Model.air65ANSI] + CandidateKeyboardModel.allCases.map(Model.candidate))
+    static let models = ([Model.air65ANSI, .air75V2] + CandidateKeyboardModel.allCases.map(Model.candidate))
         .sorted { $0.name < $1.name }
     @State private var selection: Model = .air65ANSI
     @State private var isExpanded = false
@@ -375,9 +397,13 @@ struct CandidateKeyboardCatalogView: View {
                     Text(AppCopy.value(.candidateCatalogDetail))
                         .font(.caption).foregroundStyle(.secondary)
                     Picker(AppCopy.value(.candidateModel), selection: $selection) {
-                        ForEach(models, id: \.self) { model in
+                        ForEach(Self.models, id: \.self) { model in
                             Text(model.name).tag(model)
                         }
+                    }
+                    if let detailKey = selection.detailKey {
+                        Label(AppCopy.value(detailKey), systemImage: "checkmark.seal")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     Group {
                         switch selection {
@@ -386,6 +412,11 @@ struct CandidateKeyboardCatalogView: View {
                                 health: .configured(keyboard: .disconnected), menuState: .configured,
                                 durableStatus: .signalOff, currentSignal: .signalOff, profile: .default
                             ), preview: nil))
+                        case .air75V2:
+                            Air65KeyboardView(presentation: KeyboardSignalPresentation(snapshot: LifecycleSnapshot(
+                                health: .configured(keyboard: .disconnected), menuState: .configured,
+                                durableStatus: .signalOff, currentSignal: .signalOff, profile: .default
+                            ), preview: nil), layout: .air75ANSI, model: .air75V2)
                         case .candidate(let model):
                             CandidateKeyboardIllustration(model: model)
                         }

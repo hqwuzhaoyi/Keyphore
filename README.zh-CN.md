@@ -35,7 +35,7 @@ Keyphore（读作“key-for”）是一款原生 macOS 菜单栏应用，把 Cod
 - **设置完成提示时长。** 可选 1–60 秒；执行和等待回应信号则跟随任务活动。
 - **选择空闲时的灯光。** 在「设置 → 灯效 → 空闲」选择「关闭灯光」或「使用空闲灯效」，并分别设置受控背光和条形灯。退出 Keyphore 时仍会熄灭受控灯光。
 - **从菜单栏查看键盘。** 查看当前信号、连接状态和键盘示意图，并直接打开设置，无需常驻 Dock 窗口。
-- **在真实键盘上预览。** 在 App 中运行灯光测试，检查协议回读，并确认你实际看到的效果。
+- **在真实键盘上预览。** 点击状态标签可预览六秒，修改颜色或灯效后会重新预览，结束后恢复当前任务信号。设备检查可测试三种任务信号，并确认你实际看到的效果。
 - **选择外观和语言。** 支持浅色、深色或跟随系统外观；可选英文、简体中文或跟随系统语言。
 
 ## 兼容性
@@ -45,9 +45,13 @@ Keyphore（读作“key-for”）是一款原生 macOS 菜单栏应用，把 Cod
 | Mac | Apple Silicon · macOS 13 或更高版本 |
 | Codex | 支持 Plugin 和 Hook 的桌面 App 或 CLI |
 | 键盘 | **NuPhy Air65 V3 和 Air75 V3**，原厂固件，符合受支持的 USB 设备标识 |
-| 连接 | USB 有线连接 · 一次连接一把受支持键盘 |
+| 连接 | USB 有线连接 · 多种型号可同时连接，一次选择一把控制 |
 
 Air65 V3 的 USB ID 为 `19f5:102b`，Air75 V3 为 `19f5:1028`。当前不支持 ISO/JIS 变体、蓝牙、2.4 GHz 接收器、Intel Mac 和自定义固件。除 Codex 外，可在「设置 → Agent」接入 Claude Code、Pi、OpenCode、Qoder CLI 和 Grok，并分别审查和启用。
+
+**Air75 V2** 驱动（`19f5:3246`、VIA 协议 12）提供用户 VIA 定义中的全部 41 项主背光选项：关闭及 40 种原生效果，包括渐变、循环、彩虹、雨滴、热力图、按键响应和涟漪等。非关闭选项提供 VIA 的颜色与速度参数；具体视觉表现由原生效果决定，按键响应类需要实际敲键。[验证记录](./docs/research/air75-v2-via.md) 分别记录软件检查、设备回读和人工目视结果。侧灯保持键盘自身控制，App 中的条形灯控件会标明暂不可用，驱动不发送 VIA 保存命令。每款受支持型号分别保存灯效，切换到 V2 不会沿用或覆盖 V3 的设置。
+
+在菜单栏弹窗、右键菜单或 **设置 → 设备** 的「当前控制的键盘」中选择已连接型号。「自动」会接管唯一在线的受支持有线键盘。手动选择的型号在线时会保留选择；该型号断开且检测到其他键盘后，会恢复自动模式。多把同时在线且没有有效手动选择时，从菜单指定一把。旧键盘仍在线时，切换会先关闭其受控灯区并验证；已断开的旧目标会停止由 Keyphore 管理，但不代表它的灯光已关闭。同型号连接多把仍视为歧义。「键盘型号与外观」目录只用于切换示意图。
 
 App 能识别并展示更多 NuPhy 型号。**能够识别，不代表支持灯光控制**：当前实验性灯光控制的允许列表为空。[内置型号目录](./app/Sources/KeyphoreCore/Resources/candidate-keyboards.json) 记录了可识别的设备标识和布局。
 
@@ -127,7 +131,7 @@ xcodebuild -project Keyphore.xcodeproj -scheme Keyphore \
 tools/keyphore-development-app build-open
 ```
 
-该流程需要已配置的签名身份和 `codex-temp-guard`。它会先检查是否已有 Companion 在运行，再安装到 `~/Applications/Keyphore.app`。不要直接从 DerivedData 启动开发版本。硬件测试结束后，请通过 App 退出，让它完成熄灯并停止 Companion。
+该流程使用 `/private/tmp/codex-builds` 下的临时构建目录，并要求有效签名。默认使用维护者的 Developer ID；本地开发可显式设置 `KEYPHORE_DEVELOPMENT_TEAM` 和 `KEYPHORE_SIGNING_IDENTITY`，指定匹配的团队及完整 Apple Development 证书名称。App、辅助程序和 Companion 均须通过相同身份的严格验签。流程会正常退出正在运行的 App，拒绝残留 Companion，再安装到 `~/Applications/Keyphore.app`。不要直接从 DerivedData 启动开发版本。硬件测试结束后，请通过 App 退出，让它完成熄灯并停止 Companion。
 
 <details>
 <summary>代码目录与验证范围</summary>

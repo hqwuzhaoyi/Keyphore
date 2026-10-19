@@ -43,7 +43,7 @@ final class SignalPatternAcceptanceTests: XCTestCase {
             try companion.sync(at: .milliseconds(200))
             XCTAssertEqual(fixture.lighting.behaviors.last, .off(for: zones))
             XCTAssertTrue(fixture.acknowledgement.isAcknowledged)
-            XCTAssertEqual(try fixture.ownership.load(), [])
+            XCTAssertEqual(try fixture.ownership.load().zones, [])
         }
     }
 
@@ -78,12 +78,12 @@ final class SignalPatternAcceptanceTests: XCTestCase {
         try fixture.quit.activate()
         fixture.lighting.willApply = { _ in
             XCTAssertFalse(fixture.acknowledgement.isAcknowledged)
-            XCTAssertEqual(try fixture.ownership.load(), [.backlight])
+            XCTAssertEqual(try fixture.ownership.load().zones, [.backlight])
         }
         try companion.sync(at: .milliseconds(100))
         XCTAssertEqual(fixture.lighting.behaviors, [.off, .off])
         XCTAssertEqual(fixture.lighting.actual, .off)
-        XCTAssertEqual(try fixture.ownership.load(), [])
+        XCTAssertEqual(try fixture.ownership.load().zones, [])
         XCTAssertTrue(fixture.acknowledgement.isAcknowledged)
         fixture.lighting.willApply = { _ in }
     }
@@ -103,10 +103,10 @@ final class SignalPatternAcceptanceTests: XCTestCase {
         XCTAssertEqual(fixture.lighting.behaviors.last, .off(for: .both))
         fixture.lighting.didApply = {}
         try FileManager.default.removeItem(at: fixture.ownership.url)
-        try fixture.ownership.save([.backlight, .strip])
+        try fixture.ownership.save(LightingOwnershipRecord(model: .air75V3, zones: [.backlight, .strip]))
         try companion.sync(at: .milliseconds(200))
         XCTAssertTrue(fixture.acknowledgement.isAcknowledged)
-        XCTAssertEqual(try fixture.ownership.load(), [])
+        XCTAssertEqual(try fixture.ownership.load().zones, [])
         let cleared = try Data(contentsOf: fixture.ownership.url)
         try companion.sync(at: .milliseconds(300))
         XCTAssertEqual(try Data(contentsOf: fixture.ownership.url), cleared)
@@ -122,7 +122,7 @@ final class SignalPatternAcceptanceTests: XCTestCase {
         }
         XCTAssertEqual(fixture.lighting.behaviors, [.signal(LocalProfile.default.execution)])
         XCTAssertEqual(fixture.lighting.checked.count, 5)
-        XCTAssertEqual(fixture.health.load(at: .milliseconds(4_000)), .connected(protocolHealthy: true))
+        XCTAssertEqual(fixture.health.load(at: .milliseconds(4_000)), .connected(protocolHealthy: true, model: .air75V3))
     }
 
     func testOwnershipTransitionReleasesOnlyPreviouslyManagedZones() throws {
@@ -140,7 +140,7 @@ final class SignalPatternAcceptanceTests: XCTestCase {
             .off(for: .backlight),
             .signal(LocalProfile.default.execution, controlledZones: .strip),
         ])
-        XCTAssertEqual(try fixture.ownership.load(), [.strip])
+        XCTAssertEqual(try fixture.ownership.load().zones, [.strip])
         try fixture.quit.activate()
         try companion.sync(at: .milliseconds(300))
         XCTAssertEqual(fixture.lighting.behaviors.last, .off(for: .strip))
@@ -154,11 +154,11 @@ final class SignalPatternAcceptanceTests: XCTestCase {
         try companion.sync(at: .milliseconds(0))
         try fixture.profiles.save(LocalProfile.default.replacingControlledZones(.strip))
         fixture.lighting.willApply = { behavior in
-            XCTAssertEqual(try fixture.ownership.load(), [.backlight, .strip])
+            XCTAssertEqual(try fixture.ownership.load().zones, [.backlight, .strip])
             if case .signal = behavior.strip { throw SystemAir65HIDError.deviceDisappeared }
         }
         XCTAssertThrowsError(try companion.sync(at: .milliseconds(100)))
-        XCTAssertEqual(try fixture.ownership.load(), [.backlight, .strip])
+        XCTAssertEqual(try fixture.ownership.load().zones, [.backlight, .strip])
         fixture.lighting.willApply = { _ in }
         try fixture.quit.activate()
         try Data("corrupt".utf8).write(to: fixture.status.url)
@@ -179,7 +179,7 @@ final class SignalPatternAcceptanceTests: XCTestCase {
         try companion.sync(at: .milliseconds(0))
         XCTAssertEqual(reads, 1)
         XCTAssertEqual(fixture.lighting.behaviors.last?.strip, .unmanaged)
-        XCTAssertEqual(try fixture.ownership.load(), [.backlight])
+        XCTAssertEqual(try fixture.ownership.load().zones, [.backlight])
     }
 
     func testFailedApplyReconnectAndOffAcknowledgement() throws {
