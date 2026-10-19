@@ -107,15 +107,15 @@
 "keyboard_profile.unavailable" = "Le impostazioni delle luci saranno modificabili dopo il caricamento del profilo della destinazione attuale.";
 "keyboard_profile.preview_unavailable" = "L’anteprima fisica non è disponibile. Scegli impostazioni supportate dalla tastiera attuale e riprova.";
 "keyboard_selection.title" = "Tastiera attuale";
-"keyboard_selection.detail" = "Scegli la tastiera collegata controllata da Keyphore. Automatico funziona quando ne è collegata una sola.";
+"keyboard_selection.detail" = "Una sola tastiera collegata viene selezionata automaticamente. Se ce ne sono diverse, scegline una qui.";
 "keyboard_selection.automatic" = "Automatico";
 "keyboard_selection.active" = "Destinazione attuale";
 "keyboard_selection.none" = "Nessuna";
 "keyboard_selection.connected_count" = "%d collegata/e";
 "keyboard_selection.disconnected" = "Non collegata";
-"keyboard_selection.pending" = "Cambio tastiera in corso. Attendi lo spegnimento delle zone luminose precedenti.";
+"keyboard_selection.pending" = "Applicazione della selezione della tastiera…";
 "keyboard_selection.unavailable" = "Informazioni di connessione non disponibili. Selezione e anteprima fisica sono disattivate.";
-"keyboard_selection.not_found" = "La tastiera selezionata non è collegata. Questa destinazione riprenderà alla riconnessione; nessun’altra tastiera verrà controllata automaticamente.";
+"keyboard_selection.not_found" = "La tastiera selezionata non è collegata. Le altre tastiere disponibili verranno controllate automaticamente.";
 "keyboard_selection.ambiguous" = "Sono collegati più dispositivi possibili. Scegli un modello e, se ce n’è più di uno, lasciane collegato solo uno.";
 "keyboard_selection.old_target_failed" = "Impossibile spegnere e verificare la tastiera precedente. La tastiera attiva non è cambiata.";
 "keyboard_selection.unsupported" = "Questa tastiera non può essere selezionata per il controllo.";
@@ -379,3 +379,11 @@
 "settings.idle_detail" = "Usata quando non ci sono attività in corso e il segnale di completamento è terminato. Uscendo da Keyphore, le luci controllate vengono comunque spente.";
 
 "status.idle_detail" = "Nessuna attività in corso. È attiva la luce di inattività.";
+
+"keyboard_selection.no_connected" = "Nessuna tastiera cablata supportata è collegata.";
+
+"keyboard_selection.choose_target" = "Scegli la tastiera da controllare.";
+
+"keyboard_selection.duplicate" = "Sono collegate più tastiere di questo modello. Lasciane una sola o scegli un altro modello.";
+
+"keyboard_selection.popover_hint" = "Usa il menu delle tastiere qui sopra per scegliere la tastiera da controllare.";

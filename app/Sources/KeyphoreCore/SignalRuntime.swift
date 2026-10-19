@@ -1009,6 +1009,16 @@ public final class KeyphoreCompanion {
             inventory = []
             do { inventory = try selector.keyboardInventory() }
             catch { throw KeyboardSelectionFailure.discoveryFailed }
+            do {
+                // Empty discovery can be transient during startup/wake. A different connected
+                // keyboard establishes that an absent manual preference should return to Auto.
+                if let desiredModel, inventory.contains(where: { $0.count > 0 }),
+                   !inventory.contains(where: { $0.model == desiredModel && $0.count > 0 }) {
+                    try selectionStore.clear(ifUnchanged: desiredModel)
+                }
+                desiredModel = try selectionStore.load()
+            } catch let failure as KeyboardSelectionFailure { throw failure }
+            catch { throw KeyboardSelectionFailure.stateUnavailable }
         }
         func target() -> (model: SupportedKeyboardModel?, failure: KeyboardSelectionFailure?) {
             if let desiredModel {
@@ -1016,7 +1026,7 @@ public final class KeyphoreCompanion {
                 return (desiredModel, count == 1 ? nil : count == 0 ? .notFound : .ambiguous)
             }
             let count = inventory.reduce(0) { $0 + $1.count }
-            return count == 1 ? (inventory.first?.model, nil) : (nil, count == 0 ? .notFound : .ambiguous)
+            return count == 1 ? (inventory.first { $0.count > 0 }?.model, nil) : (nil, count == 0 ? .notFound : .ambiguous)
         }
         do {
             try refreshRequestAndInventory()
@@ -1032,12 +1042,12 @@ public final class KeyphoreCompanion {
                 if let previewRequestID, let activeModel {
                     try previewController?.cancel(requestID: previewRequestID, ownedBy: activeModel)
                 }
-                // An explicit switch relinquishes a vanished control endpoint without sending
-                // or claiming a verified off. Auto routing and quit still require cleanup.
+                // A new connected topology relinquishes a vanished control endpoint without
+                // sending or claiming a verified off. Empty discovery and quit retain ownership.
                 let oldTargetIsAbsent = activeModel.map { model in
                     (inventory.first { $0.model == model }?.count ?? 0) == 0
                 } ?? false
-                let releaseDisconnectedOwner = desiredModel != nil && oldTargetIsAbsent
+                let releaseDisconnectedOwner = inventory.contains { $0.count > 0 } && oldTargetIsAbsent
                 if !ownedZones!.isEmpty && !releaseDisconnectedOwner {
                     // Cleanup is pinned to the journal's actual owner, never the new preference.
                     try selector.selectTarget(activeModel)

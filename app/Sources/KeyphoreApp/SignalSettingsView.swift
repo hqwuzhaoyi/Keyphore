@@ -562,11 +562,21 @@ func keyboardSelectionStatusKey(
 ) -> AppCopyKey? {
     if failed { return .keyboardSelectionError }
     guard let snapshot else { return .keyboardSelectionUnavailable }
+    if snapshot.failure == .discoveryFailed || snapshot.failure == .stateUnavailable {
+        return .keyboardSelectionUnavailable
+    }
+    if snapshot.failure == .unsupportedSelection { return .keyboardSelectionUnsupported }
+    if snapshot.phase == .blocked && snapshot.failure == nil { return .keyboardSelectionUnavailable }
+    if snapshot.inventory.allSatisfy({ $0.count == 0 }) { return .keyboardSelectionNoConnected }
     if desired != snapshot.desiredModel || snapshot.phase == .pending { return .keyboardSelectionPending }
     guard snapshot.phase == .blocked else { return nil }
     switch snapshot.failure {
     case .notFound: return .keyboardSelectionNotFound
-    case .ambiguous: return .keyboardSelectionAmbiguous
+    case .ambiguous:
+        if let desired, (snapshot.inventory.first { $0.model == desired }?.count ?? 0) > 1 {
+            return .keyboardSelectionDuplicate
+        }
+        return snapshot.inventory.contains { $0.count == 1 } ? .keyboardSelectionChooseTarget : .keyboardSelectionDuplicate
     case .oldTargetUnavailable, .oldTargetOffFailed: return .keyboardSelectionOldTargetFailed
     case .unsupportedSelection: return .keyboardSelectionUnsupported
     case .discoveryFailed, .stateUnavailable, nil: return .keyboardSelectionUnavailable
@@ -592,26 +602,20 @@ private struct KeyboardTargetSelectionView: View {
                         )
                     }
                 )) {
-                    ForEach(keyboardTargetOptions(
-                        desired: state.desiredKeyboardModel, snapshot: state.keyboardSelectionSnapshot
-                    )) { option in
-                        Text(optionLabel(option)).tag(option.id)
+                    ForEach(state.keyboardSelectionOptions) { option in
+                        Text(state.keyboardTargetLabel(option)).tag(option.id)
+                            .disabled(!state.canRequestKeyboardSelection(option.model))
                     }
                 }
                 .frame(width: 310)
-                .disabled(state.keyboardSelectionSnapshot == nil)
+                .disabled(!state.canRequestKeyboardSelection(nil))
             }
             HStack(spacing: 6) {
                 Text(AppCopy.value(.keyboardSelectionActive)).foregroundStyle(.secondary)
-                Text(state.keyboardSelectionSnapshot?.activeModel?.rawValue
-                    ?? AppCopy.value(.keyboardSelectionNone))
+                Text(state.keyboardSelectionActiveLabel)
                     .fontWeight(.medium)
             }.font(.caption)
-            if let key = keyboardSelectionStatusKey(
-                desired: state.desiredKeyboardModel,
-                snapshot: state.keyboardSelectionSnapshot,
-                failed: state.keyboardSelectionFailed
-            ) {
+            if let key = state.keyboardSelectionMessageKey {
                 Label(AppCopy.value(key), systemImage: key == .keyboardSelectionPending ? "hourglass" : "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(
                         key == .keyboardSelectionPending ? Color.secondary : Color.orange
@@ -620,15 +624,6 @@ private struct KeyboardTargetSelectionView: View {
         }.padding(.vertical, 14)
     }
 
-    private func optionLabel(_ option: KeyboardTargetOption) -> String {
-        guard let model = option.model else { return AppCopy.value(.keyboardSelectionAutomatic) }
-        if option.connectedCount == 0 {
-            return "\(model.rawValue) · \(AppCopy.value(.keyboardSelectionDisconnected))"
-        }
-        return "\(model.rawValue) · " + String(
-            format: AppCopy.value(.keyboardSelectionConnectedCount), option.connectedCount
-        )
-    }
 }
 
 func signalSettingsControlledZones(for model: SupportedKeyboardModel?) -> [ControlledZones] {

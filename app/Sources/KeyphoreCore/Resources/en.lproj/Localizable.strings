@@ -107,15 +107,15 @@
 "keyboard_profile.unavailable" = "Lighting settings are unavailable until the active keyboard profile can be loaded.";
 "keyboard_profile.preview_unavailable" = "Physical preview is unavailable. Choose settings supported by the current keyboard, then retry.";
 "keyboard_selection.title" = "Current keyboard";
-"keyboard_selection.detail" = "Choose which connected keyboard Keyphore controls. Automatic works when exactly one is connected.";
+"keyboard_selection.detail" = "One connected keyboard is selected automatically. With several connected, choose a keyboard here.";
 "keyboard_selection.automatic" = "Automatic";
 "keyboard_selection.active" = "Current target";
 "keyboard_selection.none" = "None";
 "keyboard_selection.connected_count" = "%d connected";
 "keyboard_selection.disconnected" = "Not connected";
-"keyboard_selection.pending" = "Switching keyboards. Waiting for the previous lighting zones to turn off.";
+"keyboard_selection.pending" = "Applying keyboard selection…";
 "keyboard_selection.unavailable" = "Connection information is unavailable. Selection and physical preview are disabled.";
-"keyboard_selection.not_found" = "The selected keyboard is not connected. This target will resume when reconnected; another keyboard will not be controlled automatically.";
+"keyboard_selection.not_found" = "The selected keyboard is not connected. Available keyboards will be checked automatically.";
 "keyboard_selection.ambiguous" = "More than one possible target is connected. Choose a model; if that model has multiple keyboards, leave only one connected.";
 "keyboard_selection.old_target_failed" = "The previous keyboard could not be turned off and verified. The active keyboard was not changed.";
 "keyboard_selection.unsupported" = "That keyboard cannot be selected for control.";
@@ -386,3 +386,11 @@
 "settings.idle_detail" = "Used when no task is active and the completion signal has ended. Quitting Keyphore still turns off the controlled lights.";
 
 "status.idle_detail" = "No active tasks. Showing your idle lighting.";
+
+"keyboard_selection.no_connected" = "No supported wired keyboard is connected.";
+
+"keyboard_selection.choose_target" = "Choose a keyboard to control.";
+
+"keyboard_selection.duplicate" = "Several keyboards of this model are connected. Leave only one, or choose a different model.";
+
+"keyboard_selection.popover_hint" = "Use the keyboard menu above to choose which keyboard to control.";

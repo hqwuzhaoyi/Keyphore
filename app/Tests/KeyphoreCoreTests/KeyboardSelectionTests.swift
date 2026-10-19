@@ -46,6 +46,36 @@ final class KeyboardSelectionTests: XCTestCase {
         XCTAssertTrue(f.base.acknowledgement.isAcknowledged)
     }
 
+    func testAutomaticHotSwapAndExpiredPreferenceUseTheOnlyConnectedModelsProfile() throws {
+        for manualPreference in [false, true] {
+            let v3 = LocalProfile.default.replacingControlledZones(.both)
+            let v2 = LocalProfile.default.replacingAppearance(LocalProfile.default.completion, for: .execution)
+            let f = try SelectionFixture(profile: v3, useModelProfiles: true)
+            try f.profiles.save(v2, for: .air75V2)
+            let v3Bytes = try Data(contentsOf: f.profiles.url(for: .air75V3))
+            let v2Bytes = try Data(contentsOf: f.profiles.url(for: .air75V2))
+            f.lighting.inventory = [.init(model: .air75V3, count: 1)]
+            if manualPreference { try f.selection.save(.air75V3) }
+            try f.base.signal()
+            try f.companion.sync(at: .milliseconds(0))
+            let attempts = f.lighting.attempts.count
+            f.lighting.inventory = [.init(model: .air75V2, count: 1)]
+
+            try f.companion.sync(at: .milliseconds(100))
+
+            XCTAssertNil(try f.selection.load())
+            XCTAssertEqual(f.snapshots.load(at: .milliseconds(100))?.phase, .applied)
+            XCTAssertEqual(f.snapshots.load(at: .milliseconds(100))?.activeModel, .air75V2)
+            XCTAssertNil(f.snapshots.load(at: .milliseconds(100))?.desiredModel)
+            XCTAssertEqual(f.lighting.attempts.dropFirst(attempts).map(\.model), [.air75V2])
+            XCTAssertEqual(f.lighting.writes.last?.behavior, .signal(v2.execution))
+            XCTAssertEqual(try f.base.ownership.load(), .init(model: .air75V2, zones: [.backlight]))
+            XCTAssertFalse(f.base.acknowledgement.isAcknowledged)
+            XCTAssertEqual(try Data(contentsOf: f.profiles.url(for: .air75V3)), v3Bytes)
+            XCTAssertEqual(try Data(contentsOf: f.profiles.url(for: .air75V2)), v2Bytes)
+        }
+    }
+
     func testExplicitSelectionIgnoresOtherModelsButNeverFallsBackOrAcceptsDuplicates() throws {
         let v2 = device(.air75V2), v3 = device(.air75V3)
         XCTAssertEqual(try Air65DeviceSelector.select(from: [v2, v3], preferredModel: .air75V2), v2)
@@ -148,21 +178,105 @@ final class KeyboardSelectionTests: XCTestCase {
         XCTAssertEqual(f.lighting.writes.map(\.model), [.air75V3, .air75V3, .air75V2])
     }
 
-    func testAutomaticRoutingAndQuitRetainDisconnectedOwnership() throws {
+    func testEmptyInventoryAndQuitRetainDisconnectedOwnershipAndPreference() throws {
         for quitting in [false, true] {
-            let f = try SelectionFixture()
-            try f.selection.save(.air75V2)
-            try f.companion.sync(at: .milliseconds(0))
-            let owner = try f.base.ownership.load()
-            f.lighting.inventory = [.init(model: .air75V3, count: 1)]
-            try f.selection.save(quitting ? .air75V3 : nil)
-            try f.base.acknowledgement.clear()
-            if quitting { try f.base.quit.activate() }
-            XCTAssertThrowsError(try f.makeCompanion().sync(at: .milliseconds(100)))
-            XCTAssertEqual(try f.base.ownership.load(), owner)
-            XCTAssertFalse(f.base.acknowledgement.isAcknowledged)
-            XCTAssertFalse(f.lighting.writes.contains { $0.model == .air75V3 })
+            for manualPreference in [false, true] {
+                let f = try SelectionFixture()
+                f.lighting.inventory = [.init(model: .air75V3, count: 1)]
+                if manualPreference { try f.selection.save(.air75V3) }
+                try f.companion.sync(at: .milliseconds(0))
+                let owner = try f.base.ownership.load()
+                f.lighting.inventory = quitting ? [.init(model: .air75V2, count: 1)] : []
+                try f.base.acknowledgement.clear()
+                if quitting { try f.base.quit.activate() }
+                XCTAssertThrowsError(try f.makeCompanion().sync(at: .milliseconds(100)))
+                XCTAssertEqual(try f.base.ownership.load(), owner)
+                XCTAssertEqual(try f.selection.load(), manualPreference ? .air75V3 : nil)
+                XCTAssertFalse(f.base.acknowledgement.isAcknowledged)
+                XCTAssertFalse(f.lighting.writes.contains { $0.model == .air75V2 })
+            }
         }
+    }
+
+    func testMultipleKeyboardsNeedAChoiceAndKeepItOnlyWhileItsModelRemains() throws {
+        let f = try SelectionFixture()
+        try f.base.signal()
+        XCTAssertThrowsError(try f.companion.sync(at: .milliseconds(0)))
+        XCTAssertEqual(f.snapshots.load(at: .milliseconds(0))?.failure, .ambiguous)
+        XCTAssertTrue(f.lighting.attempts.isEmpty)
+        try f.selection.save(.air75V2)
+        try f.companion.sync(at: .milliseconds(100))
+        try f.companion.sync(at: .milliseconds(200))
+        XCTAssertEqual(try f.selection.load(), .air75V2)
+        XCTAssertEqual(f.snapshots.load(at: .milliseconds(200))?.activeModel, .air75V2)
+        XCTAssertEqual(f.lighting.attempts.count, 1)
+        f.lighting.inventory = [.init(model: .air75V3, count: 1), .init(model: .air65V3, count: 1)]
+        XCTAssertThrowsError(try f.companion.sync(at: .milliseconds(300)))
+        XCTAssertNil(try f.selection.load())
+        XCTAssertEqual(f.snapshots.load(at: .milliseconds(300))?.failure, .ambiguous)
+        XCTAssertNil(f.snapshots.load(at: .milliseconds(300))?.activeModel)
+        XCTAssertEqual(f.lighting.attempts.count, 1, "Neither a disconnected owner nor an ambiguous new target is written")
+        XCTAssertEqual(try f.base.ownership.load(), .empty)
+        XCTAssertFalse(f.base.acknowledgement.isAcknowledged)
+        try f.selection.save(.air65V3)
+        try f.companion.sync(at: .milliseconds(400))
+        XCTAssertEqual(f.lighting.writes.last?.model, .air65V3)
+        XCTAssertEqual(f.snapshots.load(at: .milliseconds(400))?.phase, .applied)
+    }
+
+    func testDuplicateSelectedModelDoesNotDiscardPreferenceOrFallback() throws {
+        let f = try SelectionFixture()
+        try f.selection.save(.air75V3)
+        f.lighting.inventory = [.init(model: .air75V3, count: 2), .init(model: .air75V2, count: 1)]
+        XCTAssertThrowsError(try f.companion.sync(at: .milliseconds(0)))
+        XCTAssertEqual(try f.selection.load(), .air75V3)
+        XCTAssertEqual(f.snapshots.load(at: .milliseconds(0))?.failure, .ambiguous)
+        XCTAssertTrue(f.lighting.attempts.isEmpty)
+    }
+
+    func testStalePreferenceCleanupDoesNotOverwriteChoiceMadeDuringDiscovery() throws {
+        let f = try SelectionFixture()
+        try f.selection.save(.air75V3)
+        try f.companion.sync(at: .milliseconds(0))
+        f.lighting.inventory = [.init(model: .air75V2, count: 1), .init(model: .air65V3, count: 1)]
+        let otherProcessStore = KeyboardSelectionStore(url: f.selection.url)
+        f.lighting.beforeInventory = {
+            f.lighting.beforeInventory = nil
+            try otherProcessStore.save(.air65V3)
+        }
+        try f.companion.sync(at: .milliseconds(100))
+        XCTAssertEqual(try f.selection.load(), .air65V3)
+        XCTAssertEqual(f.snapshots.load(at: .milliseconds(100))?.desiredModel, .air65V3)
+        XCTAssertEqual(f.snapshots.load(at: .milliseconds(100))?.activeModel, .air65V3)
+        XCTAssertEqual(f.lighting.attempts.map(\.model), [.air75V3, .air65V3])
+    }
+
+    func testPreferenceWritesAndConditionalClearShareTheSameLock() throws {
+        let f = try SelectionFixture()
+        let otherProcessStore = KeyboardSelectionStore(url: f.selection.url)
+        try f.selection.save(.air75V3)
+        XCTAssertFalse(try otherProcessStore.clear(ifUnchanged: .air75V2))
+        XCTAssertEqual(try f.selection.load(), .air75V3)
+        let lease = try CompanionProcessLease.acquire(url: f.selection.lockURL)
+        try withExtendedLifetime(lease) {
+            XCTAssertThrowsError(try otherProcessStore.save(.air75V2))
+            XCTAssertThrowsError(try otherProcessStore.clear(ifUnchanged: .air75V3))
+        }
+        XCTAssertEqual(try f.selection.load(), .air75V3)
+    }
+
+    func testDiscoveryFailureDoesNotClearAnAbsentPreference() throws {
+        let f = try SelectionFixture()
+        try f.selection.save(.air75V3)
+        try f.companion.sync(at: .milliseconds(0))
+        let owner = try f.base.ownership.load()
+        f.lighting.inventory = [.init(model: .air75V2, count: 1)]
+        f.lighting.beforeInventory = { throw Air65DeviceSelectionError.notFound }
+        XCTAssertThrowsError(try f.companion.sync(at: .milliseconds(100)))
+        XCTAssertEqual(try f.selection.load(), .air75V3)
+        XCTAssertEqual(try f.base.ownership.load(), owner)
+        XCTAssertEqual(f.snapshots.load(at: .milliseconds(100))?.failure, .discoveryFailed)
+        XCTAssertEqual(f.lighting.attempts.map(\.model), [.air75V3])
     }
 
     func testAmbiguousOldTargetAndDiscoveryFailureCannotReleaseOwnership() throws {
@@ -191,10 +305,12 @@ final class KeyboardSelectionTests: XCTestCase {
             f.lighting.inventory = count == 0 ? [] : [.init(model: .air75V3, count: count)]
             try f.selection.save(.air75V3)
             XCTAssertThrowsError(try f.companion.sync(at: .milliseconds(100)))
-            XCTAssertEqual(try f.base.ownership.load(), LightingOwnershipRecord(model: .air75V3, zones: []))
+            XCTAssertEqual(try f.base.ownership.load(), count == 0
+                ? LightingOwnershipRecord(model: .air75V2, zones: [.backlight])
+                : LightingOwnershipRecord(model: .air75V3, zones: []))
             XCTAssertEqual(f.snapshots.load(at: .milliseconds(100))?.phase, .blocked)
-            XCTAssertEqual(f.snapshots.load(at: .milliseconds(100))?.failure, count == 0 ? .notFound : .ambiguous)
-            XCTAssertEqual(f.lighting.attempts.count, attempts)
+            XCTAssertEqual(f.snapshots.load(at: .milliseconds(100))?.failure, count == 0 ? .oldTargetUnavailable : .ambiguous)
+            XCTAssertEqual(f.lighting.attempts.count, attempts + (count == 0 ? 1 : 0))
             XCTAssertFalse(f.base.acknowledgement.isAcknowledged)
         }
     }
@@ -216,13 +332,7 @@ final class KeyboardSelectionTests: XCTestCase {
                 }
             }
             defer { f.lighting.beforeInventory = nil }
-            if changeDuringDiscovery == 1 {
-                try f.companion.sync(at: .milliseconds(100))
-            } else {
-                // A request arriving after the final read is picked up by the next poll;
-                // the stale, now-absent V3 is never written in the meantime.
-                XCTAssertThrowsError(try f.companion.sync(at: .milliseconds(100)))
-            }
+            try f.companion.sync(at: .milliseconds(100))
             XCTAssertFalse(f.lighting.attempts.contains { $0.model == .air75V3 })
             try f.companion.sync(at: .milliseconds(200))
             XCTAssertEqual(f.lighting.attempts.map(\.model), [.air75V2, .air65V3])
@@ -319,13 +429,14 @@ final class KeyboardSelectionTests: XCTestCase {
         XCTAssertEqual(try f.base.ownership.load().zones, [.backlight])
     }
 
-    func testSelectedOfflineOrDuplicateModelNeverFallsBackAndWakeRetainsTarget() throws {
+    func testSelectedPreferenceSurvivesEmptyDiscoveryAndWakeWhileDuplicatesBlock() throws {
         let f = try SelectionFixture()
         try f.selection.save(.air75V2)
-        f.lighting.inventory = [KeyboardInventoryEntry(model: .air75V3, count: 1)]
+        f.lighting.inventory = []
         XCTAssertThrowsError(try f.companion.sync(at: .milliseconds(0)))
         XCTAssertTrue(f.lighting.writes.isEmpty)
-        f.lighting.inventory.append(KeyboardInventoryEntry(model: .air75V2, count: 2))
+        XCTAssertEqual(try f.selection.load(), .air75V2)
+        f.lighting.inventory = [.init(model: .air75V3, count: 1), .init(model: .air75V2, count: 2)]
         XCTAssertThrowsError(try f.companion.sync(at: .milliseconds(100)))
         XCTAssertTrue(f.lighting.writes.isEmpty)
         f.lighting.inventory[1] = KeyboardInventoryEntry(model: .air75V2, count: 1)

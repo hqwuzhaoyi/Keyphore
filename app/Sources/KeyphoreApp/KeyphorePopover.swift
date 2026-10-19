@@ -32,6 +32,10 @@ struct KeyphorePopover: View {
                 settingsButton.buttonStyle(.plain).foregroundStyle(.secondary)
             }.padding(.bottom, 16)
 
+            if state.canSelectKeyboard {
+                KeyboardTargetQuickSelection(state: state).padding(.bottom, 14)
+            }
+
             if state.isStarting {
                 HStack(spacing: 10) {
                     ProgressView().controlSize(.small)
@@ -139,6 +143,7 @@ struct KeyphorePopover: View {
 
     private var statusTitle: String {
         if usesGenericKeyboardPresentation { return AppCopy.value(.keyboardDisconnected) }
+        if state.snapshot.keyboardHealth == .ambiguous { return AppCopy.value(.keyboardSelectionChooseTarget) }
         if candidateModels.count > 1 { return AppCopy.value(.candidateMultiple) }
         if case .unverified(let interfaces) = state.snapshot.keyboardHealth {
             return Array(Set(interfaces.map { $0.model?.rawValue ?? $0.product })).sorted().joined(separator: ", ")
@@ -153,16 +158,18 @@ struct KeyphorePopover: View {
         }
     }
 
-    private var connectionDetail: AppCopyKey {
+    var connectionDetail: AppCopyKey {
         switch state.snapshot.keyboardHealth {
         case .connected: .statusUSBConnected
         case .disconnected: .statusWaitingForUSB
+        case .ambiguous: state.keyboardSelectionMessageKey ?? .keyboardSelectionChooseTarget
         default: state.snapshot.keyboardHealth.copyKey
         }
     }
 
-    private var statusDetail: String {
+    var statusDetail: String {
         if usesGenericKeyboardPresentation { return AppCopy.value(.previewUnavailable) }
+        if state.snapshot.keyboardHealth == .ambiguous { return AppCopy.value(.keyboardSelectionPopoverHint) }
         if state.snapshot.keyboardHealth.model?.isExperimental == true { return AppCopy.value(.experimentalEnabled) }
         if case .unverified = state.snapshot.keyboardHealth { return AppCopy.value(.keyboardUnverifiedDetail) }
         if state.menuState != .ready { return AppCopy.value(.previewUnavailable) }
@@ -196,6 +203,45 @@ struct KeyphorePopover: View {
         }.accessibilityLabel(AppCopy.value(.settings)).help(AppCopy.value(.settings))
     }
 
+}
+
+struct KeyboardTargetQuickSelection: View {
+    @ObservedObject var state: KeyphoreAppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label(AppCopy.value(.keyboardSelectionTitle), systemImage: "keyboard")
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Menu {
+                    ForEach(state.keyboardSelectionOptions) { option in
+                        Button {
+                            state.requestKeyboardSelection(option.model)
+                        } label: {
+                            if option.model == state.desiredKeyboardModel {
+                                Label(state.keyboardTargetLabel(option), systemImage: "checkmark")
+                            } else {
+                                Text(state.keyboardTargetLabel(option))
+                            }
+                        }.disabled(!state.canRequestKeyboardSelection(option.model))
+                    }
+                } label: {
+                    Text(state.keyboardSelectionActiveLabel).lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel(AppCopy.value(.keyboardSelectionTitle))
+                .disabled(!state.canRequestKeyboardSelection(nil))
+                .simultaneousGesture(TapGesture().onEnded { state.refreshKeyboardSelection() })
+            }.font(.system(size: 11))
+            if let key = state.keyboardSelectionMessageKey {
+                Text(AppCopy.value(key)).font(.system(size: 10))
+                    .foregroundStyle(key == .keyboardSelectionPending ? Color.secondary : .orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 }
 
 extension AppAppearance {

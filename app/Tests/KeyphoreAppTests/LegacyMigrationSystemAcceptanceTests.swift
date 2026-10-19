@@ -373,6 +373,7 @@ final class LegacyMigrationSystemAcceptanceTests: XCTestCase {
         try fixture.prepareCurrentInstallation()
         let selectionFiles = [
             KeyphoreRuntimePaths.keyboardSelectionURL(homeDirectory: fixture.home),
+            KeyboardSelectionStore(url: KeyphoreRuntimePaths.keyboardSelectionURL(homeDirectory: fixture.home)).lockURL,
             KeyphoreRuntimePaths.keyboardSelectionSnapshotURL(homeDirectory: fixture.home),
         ]
         for url in selectionFiles { try Data("{}".utf8).write(to: url) }

@@ -107,15 +107,15 @@
 "keyboard_profile.unavailable" = "Die Lichteinstellungen sind verfügbar, sobald das Profil des aktuellen Ziels geladen ist.";
 "keyboard_profile.preview_unavailable" = "Die Vorschau ist nicht verfügbar. Wählen Sie von der aktuellen Tastatur unterstützte Einstellungen und versuchen Sie es erneut.";
 "keyboard_selection.title" = "Aktuelle Tastatur";
-"keyboard_selection.detail" = "Wählen Sie die verbundene Tastatur aus, die Keyphore steuert. Automatisch funktioniert bei genau einer Tastatur.";
+"keyboard_selection.detail" = "Eine verbundene Tastatur wird automatisch ausgewählt. Bei mehreren wählen Sie hier eine aus.";
 "keyboard_selection.automatic" = "Automatisch";
 "keyboard_selection.active" = "Aktuelles Ziel";
 "keyboard_selection.none" = "Keine";
 "keyboard_selection.connected_count" = "%d verbunden";
 "keyboard_selection.disconnected" = "Nicht verbunden";
-"keyboard_selection.pending" = "Tastaturwechsel läuft. Die vorherigen Lichtzonen werden ausgeschaltet.";
+"keyboard_selection.pending" = "Tastaturauswahl wird angewendet…";
 "keyboard_selection.unavailable" = "Verbindungsinformationen sind nicht verfügbar. Auswahl und Vorschau sind deaktiviert.";
-"keyboard_selection.not_found" = "Die ausgewählte Tastatur ist nicht verbunden. Dieses Ziel wird nach dem Verbinden fortgesetzt; eine andere Tastatur wird nicht automatisch gesteuert.";
+"keyboard_selection.not_found" = "Die ausgewählte Tastatur ist nicht verbunden. Andere verfügbare Tastaturen werden automatisch geprüft.";
 "keyboard_selection.ambiguous" = "Mehrere mögliche Ziele sind verbunden. Wählen Sie ein Modell; bei mehreren Geräten dieses Modells lassen Sie nur eines verbunden.";
 "keyboard_selection.old_target_failed" = "Die vorherige Tastatur konnte nicht ausgeschaltet und geprüft werden. Die aktive Tastatur wurde nicht geändert.";
 "keyboard_selection.unsupported" = "Diese Tastatur kann nicht zur Steuerung ausgewählt werden.";
@@ -379,3 +379,11 @@
 "settings.idle_detail" = "Gilt, wenn keine Aufgabe aktiv ist und das Abschlusssignal beendet ist. Beim Beenden von Keyphore werden die gesteuerten Lichter weiterhin ausgeschaltet.";
 
 "status.idle_detail" = "Keine aktiven Aufgaben. Die Leerlaufbeleuchtung wird angezeigt.";
+
+"keyboard_selection.no_connected" = "Keine unterstützte kabelgebundene Tastatur verbunden.";
+
+"keyboard_selection.choose_target" = "Wählen Sie die zu steuernde Tastatur.";
+
+"keyboard_selection.duplicate" = "Mehrere Tastaturen dieses Modells sind verbunden. Lassen Sie nur eine verbunden oder wählen Sie ein anderes Modell.";
+
+"keyboard_selection.popover_hint" = "Wählen Sie im Tastaturmenü oben die zu steuernde Tastatur aus.";

@@ -107,15 +107,15 @@
 "keyboard_profile.unavailable" = "Les réglages d’éclairage seront modifiables après le chargement du profil de la cible actuelle.";
 "keyboard_profile.preview_unavailable" = "L’aperçu physique est indisponible. Choisissez des réglages pris en charge par le clavier actuel, puis réessayez.";
 "keyboard_selection.title" = "Clavier actuel";
-"keyboard_selection.detail" = "Choisissez le clavier connecté contrôlé par Keyphore. Le mode automatique fonctionne avec un seul clavier.";
+"keyboard_selection.detail" = "Un seul clavier connecté est sélectionné automatiquement. Si plusieurs sont connectés, choisissez-en un ici.";
 "keyboard_selection.automatic" = "Automatique";
 "keyboard_selection.active" = "Cible actuelle";
 "keyboard_selection.none" = "Aucun";
 "keyboard_selection.connected_count" = "%d connecté(s)";
 "keyboard_selection.disconnected" = "Non connecté";
-"keyboard_selection.pending" = "Changement de clavier en cours. Attente de l’extinction des éclairages précédents.";
+"keyboard_selection.pending" = "Application du choix du clavier…";
 "keyboard_selection.unavailable" = "Les informations de connexion sont indisponibles. La sélection et l’aperçu physique sont désactivés.";
-"keyboard_selection.not_found" = "Le clavier sélectionné n’est pas connecté. Cette cible reprendra à la reconnexion ; aucun autre clavier ne sera contrôlé automatiquement.";
+"keyboard_selection.not_found" = "Le clavier sélectionné est déconnecté. Les autres claviers disponibles seront vérifiés automatiquement.";
 "keyboard_selection.ambiguous" = "Plusieurs cibles possibles sont connectées. Choisissez un modèle et, s’il y en a plusieurs, n’en laissez qu’un connecté.";
 "keyboard_selection.old_target_failed" = "Impossible d’éteindre et de vérifier le clavier précédent. Le clavier actif n’a pas changé.";
 "keyboard_selection.unsupported" = "Ce clavier ne peut pas être sélectionné pour le contrôle.";
@@ -379,3 +379,11 @@
 "settings.idle_detail" = "Utilisé lorsqu’aucune tâche n’est active et que le signal de fin est terminé. Quitter Keyphore éteint toujours les lumières contrôlées.";
 
 "status.idle_detail" = "Aucune tâche active. L’éclairage au repos est affiché.";
+
+"keyboard_selection.no_connected" = "Aucun clavier filaire pris en charge n’est connecté.";
+
+"keyboard_selection.choose_target" = "Choisissez le clavier à contrôler.";
+
+"keyboard_selection.duplicate" = "Plusieurs claviers de ce modèle sont connectés. Gardez-en un seul ou choisissez un autre modèle.";
+
+"keyboard_selection.popover_hint" = "Choisissez le clavier à contrôler dans le menu des claviers ci-dessus.";

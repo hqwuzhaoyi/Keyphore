@@ -107,15 +107,15 @@
 "keyboard_profile.unavailable" = "現在の対象のライト設定を読み込むまで編集できません。";
 "keyboard_profile.preview_unavailable" = "実機プレビューを使用できません。現在のキーボードに対応する設定を選んで再試行してください。";
 "keyboard_selection.title" = "現在のキーボード";
-"keyboard_selection.detail" = "Keyphore が制御する接続済みキーボードを選択します。自動は 1 台だけ接続されている場合に使用できます。";
+"keyboard_selection.detail" = "1 台だけ接続されている場合は自動で選択します。複数ある場合はここで選択できます。";
 "keyboard_selection.automatic" = "自動";
 "keyboard_selection.active" = "現在の対象";
 "keyboard_selection.none" = "なし";
 "keyboard_selection.connected_count" = "%d 台接続";
 "keyboard_selection.disconnected" = "未接続";
-"keyboard_selection.pending" = "キーボードを切り替えています。以前のライトが消灯するまでお待ちください。";
+"keyboard_selection.pending" = "キーボードの選択を適用中…";
 "keyboard_selection.unavailable" = "接続情報を取得できません。選択と実機プレビューは無効です。";
-"keyboard_selection.not_found" = "選択したキーボードは未接続です。再接続時にこの対象へ戻り、別のキーボードを自動制御しません。";
+"keyboard_selection.not_found" = "選択したキーボードは未接続です。他の利用可能なキーボードを自動で確認します。";
 "keyboard_selection.ambiguous" = "候補が複数接続されています。モデルを選択し、同じモデルが複数ある場合は 1 台だけ接続してください。";
 "keyboard_selection.old_target_failed" = "以前のキーボードを消灯して確認できませんでした。制御中のキーボードは変更されていません。";
 "keyboard_selection.unsupported" = "このキーボードは制御対象に選択できません。";
@@ -379,3 +379,11 @@
 "settings.idle_detail" = "実行中のタスクがなく、完了通知が終了した後に使用します。Keyphore を終了すると、制御中のライトは消灯します。";
 
 "status.idle_detail" = "実行中のタスクはありません。待機時の照明を表示しています。";
+
+"keyboard_selection.no_connected" = "対応する有線キーボードが接続されていません。";
+
+"keyboard_selection.choose_target" = "制御するキーボードを選択してください。";
+
+"keyboard_selection.duplicate" = "同じモデルが複数接続されています。1 台だけ残すか、別のモデルを選択してください。";
+
+"keyboard_selection.popover_hint" = "上のキーボードメニューで、制御するキーボードを選択してください。";

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public enum KeyboardSelectionFailure: String, Codable, Sendable, Error {
@@ -38,6 +39,7 @@ public struct KeyboardSelectionSnapshot: Codable, Equatable, Sendable {
 public final class KeyboardSelectionStore {
     public let url: URL
     public init(url: URL) { self.url = url }
+    public var lockURL: URL { url.deletingPathExtension().appendingPathExtension("lock") }
 
     private struct Preference: Codable { let model: SupportedKeyboardModel? }
 
@@ -51,8 +53,38 @@ public final class KeyboardSelectionStore {
 
     public func save(_ model: SupportedKeyboardModel?) throws {
         try Self.validate(model)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try withLock { try write(model) }
+    }
+
+    // Only discard the preference observed before discovery, never a newer user choice.
+    @discardableResult
+    func clear(ifUnchanged expected: SupportedKeyboardModel) throws -> Bool {
+        try withLock {
+            guard try load() == expected else { return false }
+            try write(nil)
+            return true
+        }
+    }
+
+    private func write(_ model: SupportedKeyboardModel?) throws {
         try JSONEncoder().encode(Preference(model: model)).write(to: url, options: .atomic)
+    }
+
+    private func withLock<T>(_ body: () throws -> T) throws -> T {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw KeyboardSelectionFailure.stateUnavailable }
+        defer { close(descriptor) }
+        let started = ContinuousClock.now
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            guard errno == EWOULDBLOCK || errno == EAGAIN,
+                  started.duration(to: .now) < .milliseconds(100) else {
+                throw KeyboardSelectionFailure.stateUnavailable
+            }
+            usleep(1_000)
+        }
+        defer { flock(descriptor, LOCK_UN) }
+        return try body()
     }
 
     static func validate(_ model: SupportedKeyboardModel?) throws {

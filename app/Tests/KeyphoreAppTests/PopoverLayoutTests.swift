@@ -5,6 +5,66 @@ import XCTest
 
 @MainActor
 final class PopoverLayoutTests: XCTestCase {
+    func testQuickKeyboardSelectionShowsAutoAndFreshModelsWithoutGrowingSingleKeyboardPanel() throws {
+        let state = try keyboardSelectionState(inventory: [.init(model: .air75V2, count: 1)], active: .air75V2)
+        XCTAssertEqual(state.keyboardSelectionOptions.map(\.model), [nil, .air75V2])
+        XCTAssertNil(state.keyboardSelectionMessageKey)
+        let picker = NSHostingController(rootView: KeyboardTargetQuickSelection(state: state).frame(width: 344))
+        let pickerSize = picker.sizeThatFits(in: NSSize(width: 344, height: 0))
+        XCTAssertLessThanOrEqual(pickerSize.height, 32)
+        let hosting = NSHostingController(rootView: KeyphorePopover(state: state))
+        let size = hosting.sizeThatFits(in: NSSize(width: 392, height: 0))
+        XCTAssertEqual(size.width, 392, accuracy: 1)
+        XCTAssertLessThanOrEqual(size.height, 440)
+        attach(hosting.view, size: size, name: "single-keyboard-quick-selection")
+    }
+
+    func testMultipleKeyboardPopoverOffersChoicesAndAnExplicitSelectionPrompt() throws {
+        let state = try keyboardSelectionState(inventory: [
+            .init(model: .air75V2, count: 1), .init(model: .air75V3, count: 1),
+        ], active: nil)
+        XCTAssertEqual(state.keyboardSelectionOptions.map(\.model), [nil, .air75V3, .air75V2])
+        XCTAssertEqual(state.keyboardSelectionMessageKey, .keyboardSelectionChooseTarget)
+        XCTAssertTrue(state.canRequestKeyboardSelection(.air75V3))
+        XCTAssertTrue(state.canRequestKeyboardSelection(.air75V2))
+        let panel = KeyphorePopover(state: state)
+        XCTAssertEqual(panel.statusDetail, AppCopy.value(.keyboardSelectionPopoverHint))
+        XCTAssertEqual(panel.connectionDetail, .keyboardSelectionChooseTarget)
+        let hosting = NSHostingController(rootView: panel)
+        let size = hosting.sizeThatFits(in: NSSize(width: 392, height: 0))
+        XCTAssertEqual(size.width, 392, accuracy: 1)
+        XCTAssertLessThanOrEqual(size.height, 510)
+        attach(hosting.view, size: size, name: "multiple-keyboard-quick-selection")
+    }
+
+    func testKeyboardSelectionDistinguishesDuplicatesEmptyInventoryAndDiscoveryFailure() throws {
+        let duplicate = KeyboardSelectionSnapshot(desiredModel: nil, activeModel: nil,
+            inventory: [.init(model: .air75V3, count: 2)], phase: .blocked, failure: .ambiguous)
+        XCTAssertEqual(keyboardSelectionStatusKey(desired: nil, snapshot: duplicate, failed: false), .keyboardSelectionDuplicate)
+        let empty = KeyboardSelectionSnapshot(desiredModel: nil, activeModel: nil, inventory: [], phase: .blocked, failure: .notFound)
+        XCTAssertEqual(keyboardSelectionStatusKey(desired: nil, snapshot: empty, failed: false), .keyboardSelectionNoConnected)
+        let failed = KeyboardSelectionSnapshot(desiredModel: nil, activeModel: nil, inventory: [], phase: .blocked, failure: .discoveryFailed)
+        XCTAssertEqual(keyboardSelectionStatusKey(desired: nil, snapshot: failed, failed: false), .keyboardSelectionUnavailable)
+        let unsupported = KeyboardSelectionSnapshot(desiredModel: nil, activeModel: nil, inventory: [], phase: .blocked, failure: .unsupportedSelection)
+        XCTAssertEqual(keyboardSelectionStatusKey(desired: nil, snapshot: unsupported, failed: false), .keyboardSelectionUnsupported)
+    }
+
+    private func keyboardSelectionState(inventory: [KeyboardInventoryEntry], active: SupportedKeyboardModel?) throws -> KeyphoreAppState {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let selection = KeyboardSelectionStore(url: directory.appending(path: "selection.json"))
+        let snapshots = KeyboardSelectionSnapshotStore(url: directory.appending(path: "snapshot.json"))
+        try selection.save(nil)
+        try snapshots.save(KeyboardSelectionSnapshot(desiredModel: nil, activeModel: active,
+            inventory: inventory, phase: active == nil ? .blocked : .applied, failure: active == nil ? .ambiguous : nil))
+        return KeyphoreAppState(lifecycle: KeyphoreLifecycle(health: SelectionLayoutHealth(model: active),
+            profiles: LayoutProfile(profile: .default), durableStatus: LayoutStatus(),
+            lighting: LayoutLighting(), runtime: LayoutRuntime()),
+            keyboardSelectionStore: selection, keyboardSelectionSnapshotStore: snapshots,
+            preferencesStore: AppPreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString)!))
+    }
+
     func testDeviceCatalogIncludesSupportedAir75V2() {
         let air75V2 = CandidateKeyboardCatalogView.models.first { $0.name == "Air75 V2" }
         XCTAssertNotNil(air75V2)
@@ -283,6 +343,13 @@ final class PopoverLayoutTests: XCTestCase {
 private struct LayoutHealth: KeyphoreHealthProviding {
     func currentHealth() -> KeyphoreHealth {
         .configured(keyboard: .connected(protocolHealthy: true, model: .air75V2))
+    }
+}
+
+private struct SelectionLayoutHealth: KeyphoreHealthProviding {
+    let model: SupportedKeyboardModel?
+    func currentHealth() -> KeyphoreHealth {
+        .configured(keyboard: model.map { .connected(protocolHealthy: true, model: $0) } ?? .ambiguous)
     }
 }
 

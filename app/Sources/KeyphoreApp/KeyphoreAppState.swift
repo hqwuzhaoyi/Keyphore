@@ -286,6 +286,38 @@ final class KeyphoreAppState: ObservableObject {
 
     var canSelectKeyboard: Bool { keyboardSelectionStore != nil }
 
+    var keyboardSelectionOptions: [KeyboardTargetOption] {
+        keyboardTargetOptions(desired: desiredKeyboardModel, snapshot: keyboardSelectionSnapshot)
+    }
+
+    var keyboardSelectionMessageKey: AppCopyKey? {
+        keyboardSelectionStatusKey(desired: desiredKeyboardModel, snapshot: keyboardSelectionSnapshot,
+                                   failed: keyboardSelectionFailed)
+    }
+
+    var keyboardSelectionActiveLabel: String {
+        keyboardSelectionSnapshot?.activeModel?.rawValue ?? AppCopy.value(.keyboardSelectionNone)
+    }
+
+    func keyboardTargetLabel(_ option: KeyboardTargetOption) -> String {
+        guard let model = option.model else { return AppCopy.value(.keyboardSelectionAutomatic) }
+        guard option.connectedCount > 0 else {
+            return "\(model.rawValue) · \(AppCopy.value(.keyboardSelectionDisconnected))"
+        }
+        return "\(model.rawValue) · " + String(format: AppCopy.value(.keyboardSelectionConnectedCount), option.connectedCount)
+    }
+
+    func canRequestKeyboardSelection(_ model: SupportedKeyboardModel?) -> Bool {
+        guard keyboardSelectionStore != nil, !isStarting, !setupIsWorking, !removalIsWorking,
+              agentIntegrationWorkingSource == nil, removalSnapshot.status != .completed,
+              let fresh = keyboardSelectionSnapshotStore?.load(), !fresh.inventory.isEmpty else { return false }
+        if let model {
+            return SupportedKeyboardModel.selectableModels.contains(model)
+                && fresh.inventory.first { $0.model == model }?.count == 1
+        }
+        return fresh.inventory.contains { $0.count > 0 }
+    }
+
     var activeKeyboardModel: SupportedKeyboardModel? {
         if let keyboardSelectionSnapshot { return keyboardSelectionSnapshot.activeModel }
         return snapshot.keyboardHealth.model
@@ -326,20 +358,34 @@ final class KeyphoreAppState: ObservableObject {
         return profileModel == keyboardSelectionSnapshot.activeModel && profileModel != nil
     }
 
-    func requestKeyboardSelection(_ model: SupportedKeyboardModel?) {
-        guard let keyboardSelectionStore, keyboardSelectionSnapshot != nil else { return }
+    @discardableResult
+    func requestKeyboardSelection(_ model: SupportedKeyboardModel?) -> Bool {
+        // A menu can outlive a USB topology change. Revalidate at the action boundary.
+        refreshKeyboardSelection()
+        guard let keyboardSelectionStore, canRequestKeyboardSelection(model) else {
+            keyboardSelectionFailed = true
+            return false
+        }
         do {
             try keyboardSelectionStore.save(model)
             desiredKeyboardModel = model
             keyboardSelectionFailed = false
+            return true
         } catch {
             keyboardSelectionFailed = true
+            return false
         }
     }
 
     func refreshKeyboardSelection() {
-        guard let keyboardSelectionSnapshotStore else { return }
-        keyboardSelectionSnapshot = keyboardSelectionSnapshotStore.load()
+        guard let keyboardSelectionStore else { return }
+        do {
+            desiredKeyboardModel = try keyboardSelectionStore.load()
+            keyboardSelectionFailed = false
+        } catch {
+            keyboardSelectionFailed = true
+        }
+        keyboardSelectionSnapshot = keyboardSelectionSnapshotStore?.load()
     }
 
     var canManageAgentIntegrations: Bool { agentIntegrations != nil }

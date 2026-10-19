@@ -107,15 +107,15 @@
 "keyboard_profile.unavailable" = "Los ajustes de iluminación se podrán editar cuando se cargue el perfil del destino actual.";
 "keyboard_profile.preview_unavailable" = "La vista previa física no está disponible. Elige ajustes compatibles con el teclado actual y vuelve a intentarlo.";
 "keyboard_selection.title" = "Teclado actual";
-"keyboard_selection.detail" = "Elige el teclado conectado que controlará Keyphore. Automático funciona cuando solo hay uno conectado.";
+"keyboard_selection.detail" = "Un único teclado conectado se selecciona automáticamente. Si hay varios, elige uno aquí.";
 "keyboard_selection.automatic" = "Automático";
 "keyboard_selection.active" = "Destino actual";
 "keyboard_selection.none" = "Ninguno";
 "keyboard_selection.connected_count" = "%d conectado(s)";
 "keyboard_selection.disconnected" = "No conectado";
-"keyboard_selection.pending" = "Cambiando de teclado. Espera a que se apaguen las zonas de iluminación anteriores.";
+"keyboard_selection.pending" = "Aplicando la selección de teclado…";
 "keyboard_selection.unavailable" = "La información de conexión no está disponible. La selección y la vista previa física están desactivadas.";
-"keyboard_selection.not_found" = "El teclado seleccionado no está conectado. Este destino se reanudará al reconectarlo; no se controlará otro teclado automáticamente.";
+"keyboard_selection.not_found" = "El teclado seleccionado no está conectado. Se comprobarán automáticamente otros teclados disponibles.";
 "keyboard_selection.ambiguous" = "Hay varios destinos posibles conectados. Elige un modelo y, si hay varios de ese modelo, deja solo uno conectado.";
 "keyboard_selection.old_target_failed" = "No se pudo apagar y verificar el teclado anterior. El teclado activo no cambió.";
 "keyboard_selection.unsupported" = "Este teclado no se puede seleccionar para controlarlo.";
@@ -379,3 +379,11 @@
 "settings.idle_detail" = "Se usa cuando no hay tareas activas y termina la señal de finalización. Al cerrar Keyphore, las luces controladas se apagan.";
 
 "status.idle_detail" = "No hay tareas activas. Se muestra la luz de inactividad.";
+
+"keyboard_selection.no_connected" = "No hay ningún teclado con cable compatible conectado.";
+
+"keyboard_selection.choose_target" = "Elige el teclado que quieres controlar.";
+
+"keyboard_selection.duplicate" = "Hay varios teclados de este modelo conectados. Deja solo uno o elige otro modelo.";
+
+"keyboard_selection.popover_hint" = "Usa el menú de teclados de arriba para elegir el teclado que quieres controlar.";

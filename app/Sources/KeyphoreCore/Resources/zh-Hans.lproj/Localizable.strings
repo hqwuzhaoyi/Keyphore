@@ -107,15 +107,15 @@
 "keyboard_profile.unavailable" = "加载当前目标的灯效配置后才可编辑。";
 "keyboard_profile.preview_unavailable" = "实体预览暂不可用。请选择当前键盘支持的设置后重试。";
 "keyboard_selection.title" = "当前控制的键盘";
-"keyboard_selection.detail" = "选择 Keyphore 要控制的已连接键盘。仅连接一把时可使用自动模式。";
+"keyboard_selection.detail" = "仅连接一把键盘时自动接管；连接多把时，可在这里选择。";
 "keyboard_selection.automatic" = "自动";
 "keyboard_selection.active" = "当前目标";
 "keyboard_selection.none" = "无";
 "keyboard_selection.connected_count" = "已连接 %d 把";
 "keyboard_selection.disconnected" = "未连接";
-"keyboard_selection.pending" = "正在切换键盘，等待旧键盘灯区关闭。";
+"keyboard_selection.pending" = "正在应用键盘选择…";
 "keyboard_selection.unavailable" = "暂时无法读取连接信息，已禁用选择和实体预览。";
-"keyboard_selection.not_found" = "所选键盘未连接。重新连接后会恢复此目标，不会自动控制其他键盘。";
+"keyboard_selection.not_found" = "所选键盘未连接，将自动检查其他可用键盘。";
 "keyboard_selection.ambiguous" = "连接了多个可能的目标。请选择型号；若同型号有多把键盘，请只保留一把连接。";
 "keyboard_selection.old_target_failed" = "无法关闭并验证旧键盘，当前控制的键盘没有改变。";
 "keyboard_selection.unsupported" = "无法选择这款键盘进行控制。";
@@ -386,3 +386,11 @@
 "settings.idle_detail" = "没有活动任务、完成提示结束后使用此设置。退出 Keyphore 仍会关闭受控灯光。";
 
 "status.idle_detail" = "当前没有活动任务，正在显示空闲灯效。";
+
+"keyboard_selection.no_connected" = "未连接受支持的有线键盘。";
+
+"keyboard_selection.choose_target" = "请选择要控制的键盘。";
+
+"keyboard_selection.duplicate" = "同型号连接了多把键盘，请只保留一把，或选择其他型号。";
+
+"keyboard_selection.popover_hint" = "请通过上方的键盘菜单选择要控制的键盘。";

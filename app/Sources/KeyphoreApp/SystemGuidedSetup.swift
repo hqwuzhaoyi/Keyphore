@@ -796,6 +796,7 @@ final class SystemGuidedSetupIntegration: GuidedSetupIntegrating, ManagedRemoval
             KeyphoreRuntimePaths.keyboardProfilesDirectory(homeDirectory: homeDirectory),
             supportDirectory.appending(path: "lighting-ownership.json"),
             KeyphoreRuntimePaths.keyboardSelectionURL(homeDirectory: homeDirectory),
+            KeyboardSelectionStore(url: KeyphoreRuntimePaths.keyboardSelectionURL(homeDirectory: homeDirectory)).lockURL,
             KeyphoreRuntimePaths.keyboardSelectionSnapshotURL(homeDirectory: homeDirectory),
             supportDirectory.appending(path: "hook-events.jsonl"),
             supportDirectory.appending(path: "companion.stdout.log"),

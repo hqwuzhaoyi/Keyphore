@@ -5,6 +5,103 @@ import KeyphoreCore
 
 @MainActor
 final class AppLifecycleAcceptanceTests: XCTestCase {
+    func testBackgroundAutomaticSelectionRefreshReplacesCachedManualPreference() throws {
+        let f = try KeyboardMenuFixture(desired: .air75V2, active: .air75V2)
+        XCTAssertEqual(f.state.desiredKeyboardModel, .air75V2)
+        try f.selection.save(nil)
+        try f.snapshots.save(KeyboardSelectionSnapshot(desiredModel: nil, activeModel: .air75V3,
+            inventory: [KeyboardInventoryEntry(model: .air75V3, count: 1)], phase: .applied))
+        f.state.refreshKeyboardSelection()
+        XCTAssertNil(f.state.desiredKeyboardModel)
+        XCTAssertEqual(f.state.activeKeyboardModel, .air75V3)
+        XCTAssertTrue(f.state.keyboardSelectionIsApplied)
+        XCTAssertFalse(f.state.keyboardSelectionAllowsPreview, "The old V2 health cannot authorize a V3 preview")
+        f.health.keyboard = .connected(protocolHealthy: true, model: .air75V3)
+        f.state.refresh()
+        f.state.beginSignalPreview(for: .attention)
+        XCTAssertEqual(try f.preview.load()?.targetModel, .air75V3)
+    }
+
+    func testStatusKeyboardSubmenuInvokesRealActionsBeforeAgentSetupIsReady() throws {
+        let f = try KeyboardMenuFixture(configured: false)
+        XCTAssertEqual(f.state.menuState, .configurationRequired)
+        let delegate = KeyphoreAppDelegate(state: f.state)
+        let menu = NSMenu()
+        delegate.menuNeedsUpdate(menu)
+        let submenu = try XCTUnwrap(menu.items.first { $0.identifier?.rawValue == "keyboard-selection" }?.submenu)
+        let v2 = try keyboardMenuItem(submenu, model: .air75V2)
+        XCTAssertTrue(v2.isEnabled)
+        XCTAssertTrue(v2.target === delegate)
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(v2.action), to: v2.target, from: v2))
+        XCTAssertEqual(try f.selection.load(), .air75V2)
+        XCTAssertEqual(f.state.activeKeyboardModel, .air75V3)
+        XCTAssertEqual(f.state.keyboardSelectionMessageKey, .keyboardSelectionPending)
+        XCTAssertFalse(f.state.keyboardSelectionAllowsPreview)
+        delegate.menuNeedsUpdate(submenu)
+        XCTAssertEqual(try keyboardMenuItem(submenu, model: .air75V2).state, .on)
+        let automatic = try keyboardMenuItem(submenu, model: nil)
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(automatic.action), to: automatic.target, from: automatic))
+        XCTAssertNil(try f.selection.load())
+    }
+
+    func testNativeMenuRechecksStaleItemsAndRefreshesInventoryWhenExpanded() throws {
+        let f = try KeyboardMenuFixture()
+        let delegate = KeyphoreAppDelegate(state: f.state)
+        let menu = NSMenu()
+        delegate.menuNeedsUpdate(menu)
+        let submenu = try XCTUnwrap(menu.items.first { $0.submenu != nil }?.submenu)
+        let oldV2 = try keyboardMenuItem(submenu, model: .air75V2)
+        try f.snapshots.save(KeyboardSelectionSnapshot(desiredModel: nil, activeModel: .air75V3,
+            inventory: [KeyboardInventoryEntry(model: .air75V3, count: 1)], phase: .applied))
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(oldV2.action), to: oldV2.target, from: oldV2))
+        XCTAssertNil(try f.selection.load(), "A disappeared menu item must not create a manual preference")
+        XCTAssertTrue(f.state.keyboardSelectionFailed)
+        delegate.menuNeedsUpdate(submenu)
+        XCTAssertFalse(submenu.items.contains { $0.representedObject as? String == SupportedKeyboardModel.air75V2.rawValue })
+        let oldV3 = try keyboardMenuItem(submenu, model: .air75V3)
+        try f.snapshots.save(KeyboardSelectionSnapshot(desiredModel: nil, activeModel: .air75V3,
+            inventory: [KeyboardInventoryEntry(model: .air75V3, count: 1)], phase: .applied,
+            observedAt: .milliseconds(StatusTimestamp.now.millisecondsSince1970 - 10_000)))
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(oldV3.action), to: oldV3.target, from: oldV3))
+        XCTAssertNil(try f.selection.load())
+        XCTAssertNil(f.state.keyboardSelectionSnapshot)
+        delegate.menuNeedsUpdate(submenu)
+        XCTAssertFalse(try keyboardMenuItem(submenu, model: nil).isEnabled)
+    }
+
+    func testDuplicateAndDisconnectedKeyboardMenuOptionsRemainVisibleButDisabled() throws {
+        let f = try KeyboardMenuFixture(desired: .air75V2, active: nil,
+            inventory: [KeyboardInventoryEntry(model: .air75V3, count: 2)])
+        let delegate = KeyphoreAppDelegate(state: f.state)
+        let menu = NSMenu()
+        delegate.menuNeedsUpdate(menu)
+        let submenu = try XCTUnwrap(menu.items.first { $0.submenu != nil }?.submenu)
+        XCTAssertFalse(try keyboardMenuItem(submenu, model: .air75V3).isEnabled)
+        XCTAssertFalse(try keyboardMenuItem(submenu, model: .air75V2).isEnabled)
+        XCTAssertTrue(try keyboardMenuItem(submenu, model: .air75V2).title.contains(AppCopy.value(.keyboardSelectionDisconnected)))
+        XCTAssertTrue(try keyboardMenuItem(submenu, model: nil).isEnabled)
+        XCTAssertFalse(f.state.requestKeyboardSelection(.air75V3))
+        XCTAssertEqual(try f.selection.load(), .air75V2)
+        try f.snapshots.save(KeyboardSelectionSnapshot(desiredModel: .air75V2, activeModel: nil,
+            inventory: [], phase: .blocked, failure: .notFound))
+        delegate.menuNeedsUpdate(submenu)
+        XCTAssertFalse(submenu.items.filter { $0.action != nil }.contains { $0.isEnabled })
+        XCTAssertEqual(f.state.keyboardSelectionMessageKey, .keyboardSelectionNoConnected)
+    }
+
+    func testKeyboardSelectionActionsStayDisabledDuringStartup() async throws {
+        let f = try KeyboardMenuFixture(starting: true)
+        XCTAssertTrue(f.state.isStarting)
+        XCTAssertFalse(f.state.canRequestKeyboardSelection(nil))
+        XCTAssertFalse(f.state.requestKeyboardSelection(.air75V2))
+        XCTAssertNil(try f.selection.load())
+        await f.state.waitForStartup()
+    }
+
+    private func keyboardMenuItem(_ menu: NSMenu, model: SupportedKeyboardModel?) throws -> NSMenuItem {
+        try XCTUnwrap(menu.items.first { $0.representedObject as? String == (model?.rawValue ?? "") })
+    }
+
     func testAppInstanceLockRejectsOverlapAndReleasesOnExit() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -393,7 +490,12 @@ final class AppLifecycleAcceptanceTests: XCTestCase {
         XCTAssertEqual(try preview.load()?.id, completed.id, "A refused save must not renew preview")
 
         // The target may change after the save but before the preview entry refreshes its state.
-        state.requestKeyboardSelection(.air75V3)
+        XCTAssertFalse(state.requestKeyboardSelection(.air75V3), "A stale inventory cannot authorize a target switch")
+        XCTAssertEqual(try selection.load(), .air75V2)
+        try snapshots.save(KeyboardSelectionSnapshot(desiredModel: .air75V2, activeModel: .air75V2,
+            inventory: [.init(model: .air75V2, count: 1), .init(model: .air75V3, count: 1)], phase: .applied))
+        XCTAssertTrue(state.requestKeyboardSelection(.air75V3))
+        XCTAssertEqual(try selection.load(), .air75V3)
         try snapshots.save(KeyboardSelectionSnapshot(desiredModel: .air75V3, activeModel: .air75V3,
             inventory: [.init(model: .air75V3, count: 1)], phase: .applied))
         health.keyboard = .connected(protocolHealthy: true, model: .air75V3)
@@ -895,6 +997,40 @@ final class AppLifecycleAcceptanceTests: XCTestCase {
             updateRuntime: runtime
         )
     }
+}
+
+@MainActor
+private final class KeyboardMenuFixture {
+    let directory: URL
+    let selection: KeyboardSelectionStore
+    let snapshots: KeyboardSelectionSnapshotStore
+    let preview: SignalPreviewStore
+    let health: AppMutableHealth
+    let state: KeyphoreAppState
+
+    init(desired: SupportedKeyboardModel? = nil, active: SupportedKeyboardModel? = .air75V3,
+         inventory: [KeyboardInventoryEntry] = [.init(model: .air75V3, count: 1), .init(model: .air75V2, count: 1)],
+         configured: Bool = true, starting: Bool = false) throws {
+        _ = NSApplication.shared
+        directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        selection = KeyboardSelectionStore(url: directory.appending(path: "selection.json"))
+        snapshots = KeyboardSelectionSnapshotStore(url: directory.appending(path: "snapshot.json"))
+        preview = SignalPreviewStore(url: directory.appending(path: "preview.json"))
+        let profiles = KeyboardProfileStore(directory: directory.appending(path: "profiles"))
+        try selection.save(desired)
+        try snapshots.save(KeyboardSelectionSnapshot(desiredModel: desired, activeModel: active,
+            inventory: inventory, phase: active == nil ? .blocked : .applied, failure: active == nil ? .ambiguous : nil))
+        health = AppMutableHealth(active.map { .connected(protocolHealthy: true, model: $0) } ?? .ambiguous)
+        health.isConfigured = configured
+        state = KeyphoreAppState(lifecycle: KeyphoreLifecycle(health: health, profiles: AppKeyboardProfiles(store: profiles, selection: snapshots),
+            durableStatus: AppDurableStatus(), lighting: AppLighting(), runtime: AppRecordingRuntime()),
+            keyboardProfileStore: profiles, previewStore: preview,
+            keyboardSelectionStore: selection, keyboardSelectionSnapshotStore: snapshots,
+            deferSystemStartup: starting, startupInspection: { throw CocoaError(.fileReadUnknown) },
+            preferencesStore: AppPreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString)!))
+    }
+
+    deinit { try? FileManager.default.removeItem(at: directory) }
 }
 
 private final class AppDiagnosticProvider: @unchecked Sendable {

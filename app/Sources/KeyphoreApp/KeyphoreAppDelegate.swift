@@ -48,6 +48,7 @@ final class KeyphoreAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     private var statusItem: NSStatusItem?
     private let statusPopover = NSPopover()
     private let statusMenu = NSMenu()
+    private var keyboardSelectionMenu: NSMenu?
     private var settingsWindow: NSWindow?
     private var stateSubscription: AnyCancellable?
     private var accessibilitySubscription: AnyCancellable?
@@ -141,7 +142,23 @@ final class KeyphoreAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        state.refreshKeyboardSelection()
+        if menu === keyboardSelectionMenu {
+            populateKeyboardSelectionMenu(menu)
+            return
+        }
         menu.removeAllItems()
+        menu.autoenablesItems = false
+        if state.canSelectKeyboard {
+            let keyboard = menu.addItem(withTitle: AppCopy.value(.keyboardSelectionTitle), action: nil, keyEquivalent: "")
+            keyboard.identifier = NSUserInterfaceItemIdentifier("keyboard-selection")
+            let submenu = NSMenu(title: keyboard.title)
+            keyboardSelectionMenu = submenu
+            submenu.delegate = self
+            populateKeyboardSelectionMenu(submenu)
+            keyboard.submenu = submenu
+            menu.addItem(.separator())
+        }
         let settings = menu.addItem(withTitle: AppCopy.value(.settings) + "…",
                                     action: #selector(openSettingsFromMenu), keyEquivalent: ",")
         settings.target = self
@@ -152,6 +169,31 @@ final class KeyphoreAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         let quit = menu.addItem(withTitle: AppCopy.value(.quit),
                                 action: #selector(quitFromMenu), keyEquivalent: "q")
         quit.target = self
+    }
+
+    private func populateKeyboardSelectionMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        menu.autoenablesItems = false
+        let active = menu.addItem(withTitle: AppCopy.value(.keyboardSelectionActive) + ": " + state.keyboardSelectionActiveLabel,
+                                  action: nil, keyEquivalent: "")
+        active.isEnabled = false
+        if let key = state.keyboardSelectionMessageKey {
+            menu.addItem(withTitle: AppCopy.value(key), action: nil, keyEquivalent: "").isEnabled = false
+        }
+        menu.addItem(.separator())
+        for option in state.keyboardSelectionOptions {
+            let item = menu.addItem(withTitle: state.keyboardTargetLabel(option),
+                                    action: #selector(selectKeyboardFromMenu(_:)), keyEquivalent: "")
+            item.representedObject = option.id
+            item.target = self
+            item.state = option.model == state.desiredKeyboardModel ? .on : .off
+            item.isEnabled = state.canRequestKeyboardSelection(option.model)
+        }
+    }
+
+    @objc private func selectKeyboardFromMenu(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String else { return }
+        state.requestKeyboardSelection(value.isEmpty ? nil : SupportedKeyboardModel(rawValue: value))
     }
 
     @objc private func openSettingsFromMenu() { showSettings() }
@@ -213,6 +255,7 @@ final class KeyphoreAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
 
     private func showStatusPopover() {
         guard let button = statusItem?.button, !statusPopover.isShown else { return }
+        state.refreshKeyboardSelection()
         ForegroundWindowAction.live.activate()
         statusPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
